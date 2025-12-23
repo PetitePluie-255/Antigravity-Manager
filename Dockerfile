@@ -13,10 +13,17 @@ FROM node:20-slim AS backend-builder
 WORKDIR /server
 COPY server/package.json server/pnpm-lock.yaml ./
 COPY server/package.json server/pnpm-lock.yaml ./
+# Install build tools for native modules (better-sqlite3)
+RUN apt-get update && \
+    apt-get install -y python3 make g++ build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile
 COPY server/ .
 RUN pnpm run build
+# Prune dev dependencies (keep native modules)
+RUN pnpm prune --prod --no-optional
 # Prune dev dependencies so we can copy only prod deps later
 
 # Stage 3: Production
@@ -30,13 +37,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 
-# Copy backend
+# Copy backend artifacts
 COPY --from=backend-builder /server/dist ./server
-COPY --from=backend-builder /server/package.json /server/pnpm-lock.yaml ./server/
+COPY --from=backend-builder /server/package.json ./server/
+COPY --from=backend-builder /server/node_modules ./server/node_modules
+
 WORKDIR /app/server
-RUN npm install -g pnpm
-RUN pnpm install --frozen-lockfile --prod
-RUN pnpm rebuild better-sqlite3
+# No need to install or rebuild, just use the copied modules
 
 # Copy frontend
 WORKDIR /app
