@@ -1,29 +1,24 @@
 # Stage 1: Build Frontend
 FROM node:20-slim AS frontend-builder
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm
-RUN pnpm install --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
-RUN pnpm run build
+RUN npm run build
 
 # Stage 2: Build Backend
 FROM node:20-slim AS backend-builder
 WORKDIR /app/server
-COPY server/package.json server/pnpm-lock.yaml ./
-COPY server/package.json server/pnpm-lock.yaml ./
+COPY server/package.json server/package-lock.json ./
 # Install build tools for native modules (better-sqlite3)
 RUN apt-get update && \
     apt-get install -y python3 make g++ build-essential && \
     rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g pnpm
-RUN pnpm install --frozen-lockfile
+RUN npm ci
 COPY server/ .
-RUN pnpm run build
+RUN npm run build
 # Prune dev dependencies (keep native modules)
-RUN pnpm prune --prod --no-optional
+RUN npm prune --production
 # Prune dev dependencies so we can copy only prod deps later
 
 # Stage 3: Production
