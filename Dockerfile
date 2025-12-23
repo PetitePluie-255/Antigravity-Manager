@@ -2,6 +2,7 @@
 FROM node:20-slim AS frontend-builder
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml ./
 RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile
 COPY . .
@@ -10,6 +11,7 @@ RUN pnpm run build
 # Stage 2: Build Backend
 FROM node:20-slim AS backend-builder
 WORKDIR /server
+COPY server/package.json server/pnpm-lock.yaml ./
 COPY server/package.json server/pnpm-lock.yaml ./
 RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile
@@ -28,6 +30,7 @@ RUN apt-get update && \
 # Copy backend
 COPY --from=backend-builder /server/dist ./server
 COPY --from=backend-builder /server/package.json /server/pnpm-lock.yaml ./server/
+WORKDIR /app/server
 WORKDIR /app/server
 RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile --prod
