@@ -17,6 +17,8 @@ RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile
 COPY server/ .
 RUN pnpm run build
+# Prune dev dependencies so we can copy only prod deps later
+RUN pnpm prune --prod --no-optional
 
 # Stage 3: Production
 FROM node:20-slim
@@ -29,11 +31,10 @@ RUN apt-get update && \
 
 # Copy backend
 COPY --from=backend-builder /server/dist ./server
-COPY --from=backend-builder /server/package.json /server/pnpm-lock.yaml ./server/
+COPY --from=backend-builder /server/package.json ./server/
+# Copy pre-built node_modules with native bindings
+COPY --from=backend-builder /server/node_modules ./server/node_modules
 WORKDIR /app/server
-WORKDIR /app/server
-RUN npm install -g pnpm
-RUN pnpm install --frozen-lockfile --prod
 
 # Copy frontend
 WORKDIR /app
