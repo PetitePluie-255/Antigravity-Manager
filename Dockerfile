@@ -1,5 +1,5 @@
 # Stage 1: Build Frontend
-FROM node:20-alpine AS frontend-builder
+FROM node:20-slim AS frontend-builder
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN npm install -g pnpm
@@ -8,7 +8,7 @@ COPY . .
 RUN pnpm run build
 
 # Stage 2: Build Backend
-FROM node:20-alpine AS backend-builder
+FROM node:20-slim AS backend-builder
 WORKDIR /server
 COPY server/package.json server/pnpm-lock.yaml ./
 RUN npm install -g pnpm
@@ -17,11 +17,13 @@ COPY server/ .
 RUN pnpm run build
 
 # Stage 3: Production
-FROM node:20-alpine
+FROM node:20-slim
 WORKDIR /app
 
-# Install required build tools for better-sqlite3
-RUN apk add --no-cache python3 make g++
+# Install required build tools for better-sqlite3 and healthcheck
+RUN apt-get update && \
+    apt-get install -y python3 make g++ build-essential curl && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy backend
 COPY --from=backend-builder /server/dist ./server
@@ -47,6 +49,6 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+    CMD curl -f http://localhost:3000/ || exit 1
 
 CMD ["node", "server/index.js"]
