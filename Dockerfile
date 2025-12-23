@@ -10,7 +10,7 @@ RUN pnpm run build
 
 # Stage 2: Build Backend
 FROM node:20-slim AS backend-builder
-WORKDIR /server
+WORKDIR /app/server
 COPY server/package.json server/pnpm-lock.yaml ./
 COPY server/package.json server/pnpm-lock.yaml ./
 # Install build tools for native modules (better-sqlite3)
@@ -38,9 +38,9 @@ RUN apt-get update && \
 
 
 # Copy backend artifacts
-COPY --from=backend-builder /server/dist ./server
-COPY --from=backend-builder /server/package.json ./server/
-COPY --from=backend-builder /server/node_modules ./server/node_modules
+COPY --from=backend-builder /app/server/dist ./server
+COPY --from=backend-builder /app/server/package.json ./server/
+COPY --from=backend-builder /app/server/node_modules ./server/node_modules
 
 WORKDIR /app/server
 # No need to install or rebuild, just use the copied modules
