@@ -1,80 +1,72 @@
-import { invoke } from '@tauri-apps/api/core';
-import { Account, QuotaData } from '../types/account';
-
-// 检查 Tauri 环境
-function ensureTauriEnvironment() {
-    // 只检查 invoke 函数是否可用
-    // 不检查 __TAURI__ 对象,因为在某些 Tauri 版本中可能不存在
-    if (typeof invoke !== 'function') {
-        throw new Error('Tauri API 未正确加载,请重启应用');
-    }
-}
+import { apiCall, isTauri } from "../utils/platform";
+import { Account, QuotaData } from "../types/account";
 
 export async function listAccounts(): Promise<Account[]> {
-    return await invoke('list_accounts');
+  return await apiCall("list_accounts");
 }
 
 export async function getCurrentAccount(): Promise<Account | null> {
-    return await invoke('get_current_account');
+  return await apiCall("get_current_account");
 }
 
-export async function addAccount(email: string, refreshToken: string): Promise<Account> {
-    return await invoke('add_account', { email, refreshToken });
+export async function addAccount(
+  email: string,
+  refreshToken: string
+): Promise<Account> {
+  return await apiCall("add_account", { email, refreshToken });
 }
 
 export async function deleteAccount(accountId: string): Promise<void> {
-    return await invoke('delete_account', { accountId });
+  return await apiCall("delete_account", { accountId });
 }
 
 export async function switchAccount(accountId: string): Promise<void> {
-    return await invoke('switch_account', { accountId });
+  return await apiCall("switch_account", { accountId });
 }
 
 export async function fetchAccountQuota(accountId: string): Promise<QuotaData> {
-    return await invoke('fetch_account_quota', { accountId });
+  return await apiCall("fetch_account_quota", { accountId });
 }
 
 export interface RefreshStats {
-    total: number;
-    success: number;
-    failed: number;
-    details: string[];
+  total: number;
+  success: number;
+  failed: number;
+  details: string[];
 }
 
 export async function refreshAllQuotas(): Promise<RefreshStats> {
-    return await invoke('refresh_all_quotas');
+  return await apiCall("refresh_all_quotas");
 }
 
-// OAuth
+// OAuth - 仅 Tauri 环境可用
 export async function startOAuthLogin(): Promise<Account> {
-    ensureTauriEnvironment();
-
-    try {
-        return await invoke('start_oauth_login');
-    } catch (error) {
-        // 增强错误信息
-        if (typeof error === 'string') {
-            // 如果是 refresh_token 缺失错误,保持原样(已包含详细说明)
-            if (error.includes('Refresh Token') || error.includes('refresh_token')) {
-                throw error;
-            }
-            // 其他错误添加上下文
-            throw `OAuth 授权失败: ${error}`;
-        }
-        throw error;
-    }
+  if (!isTauri()) {
+    throw new Error(
+      "OAuth 登录仅在桌面应用中可用。请使用 Refresh Token 方式添加账户。"
+    );
+  }
+  return await apiCall("start_oauth_login");
 }
 
 export async function cancelOAuthLogin(): Promise<void> {
-    ensureTauriEnvironment();
-    return await invoke('cancel_oauth_login');
+  if (!isTauri()) {
+    return; // Web 环境无需取消
+  }
+  return await apiCall("cancel_oauth_login");
 }
 
-// 导入
+// 导入 - 仅 Tauri 环境可用
 export async function importV1Accounts(): Promise<Account[]> {
-    return await invoke('import_v1_accounts');
+  if (!isTauri()) {
+    throw new Error("V1 备份导入仅在桌面应用中可用。");
+  }
+  return await apiCall("import_v1_accounts");
 }
 
 export async function importFromDb(): Promise<Account> {
-    return await invoke('import_from_db');
+  if (!isTauri()) {
+    throw new Error("从 IDE 数据库导入仅在桌面应用中可用。");
+  }
+  return await apiCall("import_from_db");
 }

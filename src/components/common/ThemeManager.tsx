@@ -1,76 +1,81 @@
-
-import { useEffect } from 'react';
-import { useConfigStore } from '../../stores/useConfigStore';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useEffect } from "react";
+import { useConfigStore } from "../../stores/useConfigStore";
+import { isTauri } from "../../utils/platform";
 
 export default function ThemeManager() {
-    const { config, loadConfig } = useConfigStore();
+  const { config, loadConfig } = useConfigStore();
 
-    // Load config on mount
-    useEffect(() => {
-        const init = async () => {
-            await loadConfig();
-            // Show window after a short delay to ensure React has painted
-            setTimeout(async () => {
-                await getCurrentWindow().show();
-            }, 100);
-        };
-        init();
-    }, [loadConfig]);
+  // Load config on mount
+  useEffect(() => {
+    const init = async () => {
+      await loadConfig();
+      // Show window after a short delay to ensure React has painted (Tauri only)
+      if (isTauri()) {
+        setTimeout(async () => {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          await getCurrentWindow().show();
+        }, 100);
+      }
+    };
+    init();
+  }, [loadConfig]);
 
-    // Apply theme when config changes
-    useEffect(() => {
-        if (!config) return;
+  // Apply theme when config changes
+  useEffect(() => {
+    if (!config) return;
 
-        const applyTheme = async (theme: string) => {
-            const root = document.documentElement;
-            const isDark = theme === 'dark';
+    const applyTheme = async (theme: string) => {
+      const root = document.documentElement;
+      const isDark = theme === "dark";
 
-            // Set Tauri window background color
-            try {
-                const bgColor = isDark ? '#1d232a' : '#FAFBFC';
-                await getCurrentWindow().setBackgroundColor(bgColor);
-            } catch (e) {
-                console.error('Failed to set window background color:', e);
-            }
-
-            // Set DaisyUI theme
-            root.setAttribute('data-theme', theme);
-
-            // Set inline style for immediate visual feedback
-            root.style.backgroundColor = isDark ? '#1d232a' : '#FAFBFC';
-
-            // Set Tailwind dark mode class
-            if (isDark) {
-                root.classList.add('dark');
-            } else {
-                root.classList.remove('dark');
-            }
-        };
-
-        const theme = config.theme || 'system';
-
-        // Sync to localStorage for early boot check
-        localStorage.setItem('app-theme-preference', theme);
-
-        if (theme === 'system') {
-            const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-
-            const handleSystemChange = (e: MediaQueryListEvent | MediaQueryList) => {
-                const systemTheme = e.matches ? 'dark' : 'light';
-                applyTheme(systemTheme);
-            };
-
-            // Initial alignment
-            handleSystemChange(mediaQuery);
-
-            // Listen for changes
-            mediaQuery.addEventListener('change', handleSystemChange);
-            return () => mediaQuery.removeEventListener('change', handleSystemChange);
-        } else {
-            applyTheme(theme);
+      // Set Tauri window background color (Tauri only)
+      if (isTauri()) {
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          const bgColor = isDark ? "#1d232a" : "#FAFBFC";
+          await getCurrentWindow().setBackgroundColor(bgColor);
+        } catch (e) {
+          console.error("Failed to set window background color:", e);
         }
-    }, [config?.theme]);
+      }
 
-    return null; // This component handles side effects only
+      // Set DaisyUI theme
+      root.setAttribute("data-theme", theme);
+
+      // Set inline style for immediate visual feedback
+      root.style.backgroundColor = isDark ? "#1d232a" : "#FAFBFC";
+
+      // Set Tailwind dark mode class
+      if (isDark) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    };
+
+    const theme = config.theme || "system";
+
+    // Sync to localStorage for early boot check
+    localStorage.setItem("app-theme-preference", theme);
+
+    if (theme === "system") {
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+      const handleSystemChange = (e: MediaQueryListEvent | MediaQueryList) => {
+        const systemTheme = e.matches ? "dark" : "light";
+        applyTheme(systemTheme);
+      };
+
+      // Initial alignment
+      handleSystemChange(mediaQuery);
+
+      // Listen for changes
+      mediaQuery.addEventListener("change", handleSystemChange);
+      return () => mediaQuery.removeEventListener("change", handleSystemChange);
+    } else {
+      applyTheme(theme);
+    }
+  }, [config?.theme]);
+
+  return null; // This component handles side effects only
 }

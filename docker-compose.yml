@@ -1,0 +1,15 @@
+services:
+  antigravity-manager:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - antigravity-data:/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATA_DIR=/data
+    restart: unless-stopped
+
+volumes:
+  antigravity-data:

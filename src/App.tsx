@@ -1,20 +1,20 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
-import Layout from './components/layout/Layout';
-import Dashboard from './pages/Dashboard';
-import Accounts from './pages/Accounts';
-import Settings from './pages/Settings';
-import ApiProxy from './pages/ApiProxy';
-import ThemeManager from './components/common/ThemeManager';
-import { useEffect } from 'react';
-import { useConfigStore } from './stores/useConfigStore';
-import { useAccountStore } from './stores/useAccountStore';
-import { useTranslation } from 'react-i18next';
-import { listen } from '@tauri-apps/api/event';
+import Layout from "./components/layout/Layout";
+import Dashboard from "./pages/Dashboard";
+import Accounts from "./pages/Accounts";
+import Settings from "./pages/Settings";
+import ApiProxy from "./pages/ApiProxy";
+import ThemeManager from "./components/common/ThemeManager";
+import { useEffect } from "react";
+import { useConfigStore } from "./stores/useConfigStore";
+import { useAccountStore } from "./stores/useAccountStore";
+import { useTranslation } from "react-i18next";
+import { isTauri } from "./utils/platform";
 
 const router = createBrowserRouter([
   {
-    path: '/',
+    path: "/",
     element: <Layout />,
     children: [
       {
@@ -22,15 +22,15 @@ const router = createBrowserRouter([
         element: <Dashboard />,
       },
       {
-        path: 'accounts',
+        path: "accounts",
         element: <Accounts />,
       },
       {
-        path: 'api-proxy',
+        path: "api-proxy",
         element: <ApiProxy />,
       },
       {
-        path: 'settings',
+        path: "settings",
         element: <Settings />,
       },
     ],
@@ -53,32 +53,40 @@ function App() {
     }
   }, [config?.language, i18n]);
 
-  // Listen for tray events
+  // Listen for tray events (Tauri only)
   useEffect(() => {
+    if (!isTauri()) return; // Skip in web mode
+
     const unlistenPromises: Promise<() => void>[] = [];
 
-    // 监听托盘切换账号事件
-    unlistenPromises.push(
-      listen('tray://account-switched', () => {
-        console.log('[App] Tray account switched, refreshing...');
-        fetchCurrentAccount();
-        fetchAccounts();
-      })
-    );
+    const setupListeners = async () => {
+      const { listen } = await import("@tauri-apps/api/event");
 
-    // 监听托盘刷新事件
-    unlistenPromises.push(
-      listen('tray://refresh-current', () => {
-        console.log('[App] Tray refresh triggered, refreshing...');
-        fetchCurrentAccount();
-        fetchAccounts();
-      })
-    );
+      // 监听托盘切换账号事件
+      unlistenPromises.push(
+        listen("tray://account-switched", () => {
+          console.log("[App] Tray account switched, refreshing...");
+          fetchCurrentAccount();
+          fetchAccounts();
+        })
+      );
+
+      // 监听托盘刷新事件
+      unlistenPromises.push(
+        listen("tray://refresh-current", () => {
+          console.log("[App] Tray refresh triggered, refreshing...");
+          fetchCurrentAccount();
+          fetchAccounts();
+        })
+      );
+    };
+
+    setupListeners();
 
     // Cleanup
     return () => {
-      Promise.all(unlistenPromises).then(unlisteners => {
-        unlisteners.forEach(unlisten => unlisten());
+      Promise.all(unlistenPromises).then((unlisteners) => {
+        unlisteners.forEach((unlisten) => unlisten());
       });
     };
   }, [fetchCurrentAccount, fetchAccounts]);
