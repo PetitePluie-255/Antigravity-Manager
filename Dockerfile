@@ -18,23 +18,25 @@ RUN pnpm install --frozen-lockfile
 COPY server/ .
 RUN pnpm run build
 # Prune dev dependencies so we can copy only prod deps later
-RUN pnpm prune --prod --no-optional
 
 # Stage 3: Production
 FROM node:20-slim
 WORKDIR /app
 
 # Install required build tools for better-sqlite3 and healthcheck
+# Install required build tools for better-sqlite3 and healthcheck
 RUN apt-get update && \
-    apt-get install -y python3 make g++ build-essential curl && \
+    apt-get install -y python3 make g++ build-essential curl python-is-python3 && \
     rm -rf /var/lib/apt/lists/*
+
 
 # Copy backend
 COPY --from=backend-builder /server/dist ./server
-COPY --from=backend-builder /server/package.json ./server/
-# Copy pre-built node_modules with native bindings
-COPY --from=backend-builder /server/node_modules ./server/node_modules
+COPY --from=backend-builder /server/package.json /server/pnpm-lock.yaml ./server/
 WORKDIR /app/server
+RUN npm install -g pnpm
+RUN pnpm install --frozen-lockfile --prod
+RUN pnpm rebuild better-sqlite3
 
 # Copy frontend
 WORKDIR /app
