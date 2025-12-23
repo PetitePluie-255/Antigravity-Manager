@@ -7,7 +7,7 @@ import {
   fetchQuota,
 } from "../services/google.js";
 
-export const accountRoutes = Router();
+export const accountRoutes: Router = Router();
 
 // Types
 interface Account {

@@ -19,7 +19,7 @@ import {
   parseSSEStream,
 } from "../services/geminiClient.js";
 
-export const proxyRoutes = Router();
+export const proxyRoutes: Router = Router();
 
 // Helper to get config
 function getProxyConfig() {

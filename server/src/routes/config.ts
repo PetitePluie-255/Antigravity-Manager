@@ -3,7 +3,7 @@ import { db, DATA_DIR } from "../db/sqlite.js";
 import crypto from "crypto";
 import { getTokenCount } from "../services/tokenManager.js";
 
-export const configRoutes = Router();
+export const configRoutes: Router = Router();
 
 // Default config
 const defaultConfig = {
