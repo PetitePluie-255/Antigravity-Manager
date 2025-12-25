@@ -1,6 +1,8 @@
 {
     "common": {
         "loading": "Loading...",
+        "add": "Add",
+        "action": "Action",
         "save": "Save",
         "saved": "Saved successfully",
         "cancel": "Cancel",
@@ -300,17 +302,57 @@
             "sonnet_thinking": "Chain of Thought",
             "opus_thinking": "Strongest Thinking"
         },
-        "examples": {
-            "title": "Usage Examples"
+        "router": {
+            "title": "Model Router",
+            "subtitle": "Route models by series or add custom exact mappings.",
+            "group_title": "Series Groups",
+            "groups": {
+                "claude_45": {
+                    "name": "Claude 4.5 Series",
+                    "desc": "Opus 4.5, Sonnet 4.5"
+                },
+                "claude_35": {
+                    "name": "Claude 3.5 Series",
+                    "desc": "Sonnet 3.5, Haiku 3.5"
+                },
+                "gpt_4": {
+                    "name": "GPT-4 / o1 Series",
+                    "desc": "GPT-4, Turbo, o1-preview"
+                },
+                "gpt_4o": {
+                    "name": "GPT-4o / 3.5 Series",
+                    "desc": "GPT-4o, Mini, 3.5 Turbo"
+                }
+            },
+            "expert_title": "Expert Custom Routing",
+            "expert_subtitle": "Precise matching for any original model ID.",
+            "reset_confirm": "Reset all mappings to system defaults?",
+            "reset_mapping": "Reset Mapping",
+            "add_mapping": "Add Mapping",
+            "current_list": "Custom List",
+            "no_custom_mapping": "No custom mappings yet",
+            "original_id": "Original ID",
+            "route_to": "Route To"
         },
         "multi_protocol": {
             "title": "Multi-Protocol Support",
-            "subtitle": "协议支持",
+            "subtitle": "Protocol Support",
             "description": "Proxy service supports both OpenAI and Anthropic API formats to meet different tool requirements",
             "openai_label": "OpenAI Protocol",
             "anthropic_label": "Anthropic Protocol",
-            "openai_tools": "Cursor, Windsurf, NextChat",
-            "anthropic_tools": "Claude Code CLI"
+            "openai_tools": "Cherry Studio, NextChat",
+            "anthropic_tools": "Claude Code CLI",
+            "gemini_label": "Gemini Protocol",
+            "gemini_tools": "Google AI SDK, LangChain",
+            "quick_integration": "Quick Integration",
+            "click_tip": "👆 Click any model on the left to update this code."
+        },
+        "supported_models": {
+            "title": "Supported Models & Integration",
+            "model_name": "Model Name",
+            "model_id": "Model ID",
+            "description": "Description",
+            "action": "Action"
         }
     }
 }

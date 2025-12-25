@@ -76,6 +76,8 @@ pub async fn start_proxy_service(
             config.port,
             token_manager.clone(),
             config.anthropic_mapping.clone(),
+            config.openai_mapping.clone(),
+            config.custom_mapping.clone(),
             config.request_timeout,
             config.upstream_proxy.clone(),
         ).await {
@@ -186,20 +188,23 @@ pub async fn reload_proxy_accounts(
 /// 更新模型映射表 (热更新)
 #[tauri::command]
 pub async fn update_model_mapping(
-    mapping: std::collections::HashMap<String, String>,
+    config: ProxyConfig,
     state: State<'_, ProxyServiceState>,
 ) -> Result<(), String> {
     let instance_lock = state.instance.read().await;
     
-    // 1. 如果服务正在运行，立即更新内存中的映射
+    // 1. 如果服务正在运行，立即更新内存中的映射 (这里目前只更新了 anthropic_mapping 的 RwLock, 
+    // 后续可以根据需要让 resolve_model_route 直接读取全量 config)
     if let Some(instance) = instance_lock.as_ref() {
-        instance.axum_server.update_mapping(mapping.clone()).await;
-        tracing::info!("后端服务已接收新的模型映射配置");
+        instance.axum_server.update_mapping(&config).await;
+        tracing::info!("后端服务已接收全量模型映射配置");
     }
     
     // 2. 无论是否运行，都保存到全局配置持久化
     let mut app_config = crate::modules::config::load_app_config().map_err(|e| e)?;
-    app_config.proxy.anthropic_mapping = mapping;
+    app_config.proxy.anthropic_mapping = config.anthropic_mapping;
+    app_config.proxy.openai_mapping = config.openai_mapping;
+    app_config.proxy.custom_mapping = config.custom_mapping;
     crate::modules::config::save_app_config(&app_config).map_err(|e| e)?;
     
     Ok(())

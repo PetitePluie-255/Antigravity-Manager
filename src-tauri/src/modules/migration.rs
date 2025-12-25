@@ -193,42 +193,7 @@ pub async fn import_from_v1() -> Result<Vec<Account>, String> {
 pub async fn import_from_db() -> Result<Account, String> {
     use crate::modules::oauth;
 
-    let db_path = db::get_db_path()?;
-    
-    if !db_path.exists() {
-        return Err(format!("找不到数据库文件: {:?}", db_path));
-    }
-    
-    // 连接数据库
-    let conn = rusqlite::Connection::open(&db_path)
-        .map_err(|e| format!("打开数据库失败: {}", e))?;
-        
-    // 从 ItemTable 读取
-    let current_data: String = conn
-        .query_row(
-            "SELECT value FROM ItemTable WHERE key = ?",
-            ["jetskiStateSync.agentManagerInitState"],
-            |row| row.get(0),
-        )
-        .map_err(|_| "未找到登录状态数据，请确认已在 IDE 中登录".to_string())?;
-        
-    // Base64 解码
-    let blob = general_purpose::STANDARD
-        .decode(&current_data)
-        .map_err(|e| format!("Base64 解码失败: {}", e))?;
-        
-    // 1. 查找 oauthTokenInfo (Field 6)
-    let oauth_data = protobuf::find_field(&blob, 6)
-        .map_err(|e| format!("解析 Protobuf 失败: {}", e))?
-        .ok_or("未找到 OAuth 数据，可能未登录")?;
-        
-    // 2. 提取 refresh_token (Field 3)
-    let refresh_bytes = protobuf::find_field(&oauth_data, 3)
-        .map_err(|e| format!("解析 OAuth 数据失败: {}", e))?
-        .ok_or("数据中未包含 Refresh Token")?;
-        
-    let refresh_token = String::from_utf8(refresh_bytes)
-        .map_err(|_| "Refresh Token 非 UTF-8 编码".to_string())?;
+    let refresh_token = get_refresh_token_from_db()?;
         
     // 3. 使用 Refresh Token 获取最新的 Access Token 和用户信息
     // 这一步至关重要，因为 DB 中的 Access Token 可能已过期，且我们需要 Email
@@ -251,4 +216,44 @@ pub async fn import_from_db() -> Result<Account, String> {
     
     // 4. 添加或更新账号
     account::upsert_account(email.clone(), user_info.name, token_data)
+}
+
+/// 从数据库获取当前 Refresh Token (不执行网络请求)
+pub fn get_refresh_token_from_db() -> Result<String, String> {
+    let db_path = db::get_db_path()?;
+    
+    if !db_path.exists() {
+        return Err(format!("找不到数据库文件: {:?}", db_path));
+    }
+    
+    // 连接数据库
+    let conn = rusqlite::Connection::open(&db_path)
+        .map_err(|e| format!("打开数据库失败: {}", e))?;
+        
+    // 从 ItemTable 读取
+    let current_data: String = conn
+        .query_row(
+            "SELECT value FROM ItemTable WHERE key = ?",
+            ["jetskiStateSync.agentManagerInitState"],
+            |row| row.get(0),
+        )
+        .map_err(|_| "未找到登录状态数据".to_string())?;
+        
+    // Base64 解码
+    let blob = general_purpose::STANDARD
+        .decode(&current_data)
+        .map_err(|e| format!("Base64 解码失败: {}", e))?;
+        
+    // 1. 查找 oauthTokenInfo (Field 6)
+    let oauth_data = protobuf::find_field(&blob, 6)
+        .map_err(|e| format!("解析 Protobuf 失败: {}", e))?
+        .ok_or("未找到 OAuth 数据")?;
+        
+    // 2. 提取 refresh_token (Field 3)
+    let refresh_bytes = protobuf::find_field(&oauth_data, 3)
+        .map_err(|e| format!("解析 OAuth 数据失败: {}", e))?
+        .ok_or("数据中未包含 Refresh Token")?;
+        
+    String::from_utf8(refresh_bytes)
+        .map_err(|_| "Refresh Token 非 UTF-8 编码".to_string())
 }

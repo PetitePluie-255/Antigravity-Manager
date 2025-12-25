@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { isTauri, apiCall } from "../utils/platform";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useConfigStore } from "../stores/useConfigStore";
 import { AppConfig } from "../types/config";
 import ModalDialog from "../components/common/ModalDialog";
@@ -61,10 +62,12 @@ function Settings() {
   useEffect(() => {
     loadConfig();
 
-    // 获取真实数据目录路径 (仅 Tauri)
-    apiCall<string>("get_data_dir_path")
-      .then((path) => setDataDirPath(path))
-      .catch((err) => console.error("Failed to get data dir:", err));
+    // 获取真实数据目录路径
+    if (isTauri()) {
+      apiCall<string>("get_data_dir_path")
+        .then((path) => setDataDirPath(path))
+        .catch((err) => console.error("Failed to get data dir:", err));
+    }
   }, [loadConfig]);
 
   useEffect(() => {
@@ -84,9 +87,7 @@ function Settings() {
 
   const confirmClearLogs = async () => {
     try {
-      if (isTauri()) {
-        await apiCall("clear_log_cache");
-      }
+      await apiCall("clear_log_cache");
       showToast(t("settings.advanced.logs_cleared"), "success");
     } catch (error) {
       showToast(`${t("common.error")}: ${error}`, "error");
@@ -95,10 +96,6 @@ function Settings() {
   };
 
   const handleOpenDataDir = async () => {
-    if (!isTauri()) {
-      showToast("此功能仅在桌面应用中可用", "warning");
-      return;
-    }
     try {
       await apiCall("open_data_folder");
     } catch (error) {
@@ -107,12 +104,7 @@ function Settings() {
   };
 
   const handleSelectExportPath = async () => {
-    if (!isTauri()) {
-      showToast("此功能仅在桌面应用中可用", "warning");
-      return;
-    }
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       // @ts-ignore
       const selected = await open({
         directory: true,
@@ -210,9 +202,7 @@ function Settings() {
               }`}
               onClick={() => setActiveTab("advanced")}
             >
-              {isTauri()
-                ? t("settings.tabs.advanced")
-                : t("settings.advanced.logs_title")}
+              {t("settings.tabs.advanced")}
             </button>
             <button
               className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${
@@ -393,98 +383,84 @@ function Settings() {
           {activeTab === "advanced" && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-base-content">
-                {isTauri()
-                  ? t("settings.advanced.title")
-                  : t("settings.advanced.logs_title")}
+                {t("settings.advanced.title")}
               </h2>
 
-              {/* 默认导出路径 - 仅 Tauri */}
-              {isTauri() && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 dark:text-base-content mb-1">
-                    {t("settings.advanced.export_path")}
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="flex-1 px-4 py-4 border border-gray-200 dark:border-base-300 rounded-lg bg-gray-50 dark:bg-base-200 text-gray-900 dark:text-base-content font-medium"
-                      value={
-                        formData.default_export_path ||
-                        t("settings.advanced.export_path_placeholder")
+              {/* 默认导出路径 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-900 dark:text-base-content mb-1">
+                  {t("settings.advanced.export_path")}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 px-4 py-4 border border-gray-200 dark:border-base-300 rounded-lg bg-gray-50 dark:bg-base-200 text-gray-900 dark:text-base-content font-medium"
+                    value={
+                      formData.default_export_path ||
+                      t("settings.advanced.export_path_placeholder")
+                    }
+                    readOnly
+                  />
+                  {formData.default_export_path && (
+                    <button
+                      className="px-4 py-2 border border-gray-200 dark:border-base-300 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          default_export_path: undefined,
+                        })
                       }
-                      readOnly
-                    />
-                    {formData.default_export_path && (
-                      <button
-                        className="px-4 py-2 border border-gray-200 dark:border-base-300 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
-                        onClick={() =>
-                          setFormData({
-                            ...formData,
-                            default_export_path: undefined,
-                          })
-                        }
-                      >
-                        {t("common.clear")}
-                      </button>
-                    )}
-                    <button
-                      className="px-4 py-2 border border-gray-200 dark:border-base-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-base-200 hover:text-gray-900 dark:hover:text-base-content transition-colors"
-                      onClick={handleSelectExportPath}
                     >
-                      {t("settings.advanced.select_btn")}
+                      {t("common.clear")}
                     </button>
-                  </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                    {t("settings.advanced.default_export_path_desc")}
-                  </p>
+                  )}
+                  <button
+                    className="px-4 py-2 border border-gray-200 dark:border-base-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-base-200 hover:text-gray-900 dark:hover:text-base-content transition-colors"
+                    onClick={handleSelectExportPath}
+                  >
+                    {t("settings.advanced.select_btn")}
+                  </button>
                 </div>
-              )}
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                  {t("settings.advanced.default_export_path_desc")}
+                </p>
+              </div>
 
-              {/* 数据目录 - 仅 Tauri */}
-              {isTauri() && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 dark:text-base-content mb-1">
-                    {t("settings.advanced.data_dir")}
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      className="flex-1 px-4 py-4 border border-gray-200 dark:border-base-300 rounded-lg bg-gray-50 dark:bg-base-200 text-gray-900 dark:text-base-content font-medium"
-                      value={dataDirPath}
-                      readOnly
-                    />
-                    <button
-                      className="px-4 py-2 border border-gray-200 dark:border-base-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-base-200 hover:text-gray-900 dark:hover:text-base-content transition-colors"
-                      onClick={handleOpenDataDir}
-                    >
-                      {t("settings.advanced.open_btn")}
-                    </button>
-                  </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                    {t("settings.advanced.data_dir_desc")}
-                  </p>
+              {/* 数据目录 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-900 dark:text-base-content mb-1">
+                  {t("settings.advanced.data_dir")}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 px-4 py-4 border border-gray-200 dark:border-base-300 rounded-lg bg-gray-50 dark:bg-base-200 text-gray-900 dark:text-base-content font-medium"
+                    value={dataDirPath}
+                    readOnly
+                  />
+                  <button
+                    className="px-4 py-2 border border-gray-200 dark:border-base-300 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-base-200 hover:text-gray-900 dark:hover:text-base-content transition-colors"
+                    onClick={handleOpenDataDir}
+                  >
+                    {t("settings.advanced.open_btn")}
+                  </button>
                 </div>
-              )}
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                  {t("settings.advanced.data_dir_desc")}
+                </p>
+              </div>
 
-              <div
-                className={
-                  isTauri()
-                    ? "border-t border-gray-200 dark:border-base-200 pt-4"
-                    : ""
-                }
-              >
-                {isTauri() && (
-                  <h3 className="font-medium text-gray-900 dark:text-base-content mb-3">
-                    {t("settings.advanced.logs_title")}
-                  </h3>
-                )}
+              <div className="border-t border-gray-200 dark:border-base-200 pt-4">
+                <h3 className="font-medium text-gray-900 dark:text-base-content mb-3">
+                  {t("settings.advanced.logs_title")}
+                </h3>
                 <div className="bg-gray-50 dark:bg-base-200 border border-gray-200 dark:border-base-300 rounded-lg p-3 mb-3">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     {t("settings.advanced.logs_desc")}
                   </p>
                 </div>
                 <div className="badge badge-primary badge-outline gap-2 font-mono">
-                  v3.1.1
+                  v3.2.0
                 </div>
                 <div className="flex items-center gap-4">
                   <button
@@ -610,7 +586,7 @@ function Settings() {
                     </h3>
                     <div className="flex items-center justify-center gap-2 text-sm">
                       <span className="px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium border border-blue-200 dark:border-blue-800">
-                        v3.1.1
+                        v3.2.0
                       </span>
                       <span className="text-gray-400 dark:text-gray-600">
                         •

@@ -5,6 +5,11 @@ use uuid::Uuid;
 
 use crate::models::{Account, AccountIndex, AccountSummary, TokenData, QuotaData};
 use crate::modules;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+/// 全局账号写入锁，防止并发操作导致索引文件损坏
+static ACCOUNT_INDEX_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 // ... existing constants ...
 const DATA_DIR: &str = ".antigravity_tools";
@@ -60,16 +65,22 @@ pub fn load_account_index() -> Result<AccountIndex, String> {
     Ok(index)
 }
 
-/// 保存账号索引
+/// 保存账号索引 (原子化写入)
 pub fn save_account_index(index: &AccountIndex) -> Result<(), String> {
     let data_dir = get_data_dir()?;
     let index_path = data_dir.join(ACCOUNTS_INDEX);
+    let temp_path = data_dir.join(format!("{}.tmp", ACCOUNTS_INDEX));
     
     let content = serde_json::to_string_pretty(index)
         .map_err(|e| format!("序列化账号索引失败: {}", e))?;
     
-    fs::write(&index_path, content)
-        .map_err(|e| format!("保存账号索引失败: {}", e))
+    // 写入临时文件
+    fs::write(&temp_path, content)
+        .map_err(|e| format!("写入临时索引文件失败: {}", e))?;
+        
+    // 原子重命名
+    fs::rename(temp_path, index_path)
+        .map_err(|e| format!("替换索引文件失败: {}", e))
 }
 
 /// 加载账号数据
@@ -101,15 +112,44 @@ pub fn save_account(account: &Account) -> Result<(), String> {
 }
 
 /// 列出所有账号
+/// 列出所有账号
 pub fn list_accounts() -> Result<Vec<Account>, String> {
     crate::modules::logger::log_info("已开始列出账号...");
-    let index = load_account_index()?;
+    let mut index = load_account_index()?;
     let mut accounts = Vec::new();
+    let mut invalid_ids = Vec::new();
     
     for summary in &index.accounts {
         match load_account(&summary.id) {
             Ok(account) => accounts.push(account),
-            Err(e) => crate::modules::logger::log_error(&format!("加载账号 {} 失败: {}", summary.id, e)),
+            Err(e) => {
+                crate::modules::logger::log_error(&format!("加载账号 {} 失败: {}", summary.id, e));
+                // 如果是文件不存在导致的错误，标记为无效 ID
+                // load_account 返回 "账号不存在: id" 或者底层 io error
+                if e.contains("账号不存在") || e.contains("Os { code: 2,") || e.contains("No such file") {
+                    invalid_ids.push(summary.id.clone());
+                }
+            },
+        }
+    }
+    
+    // 自动修复索引：移除无效的账号 ID
+    if !invalid_ids.is_empty() {
+        crate::modules::logger::log_warn(&format!("发现 {} 个无效的账号索引，正在自动清理...", invalid_ids.len()));
+        
+        index.accounts.retain(|s| !invalid_ids.contains(&s.id));
+        
+        // 如果当前选中的账号也是无效的，重置为第一个可用账号
+        if let Some(current_id) = &index.current_account_id {
+            if invalid_ids.contains(current_id) {
+                index.current_account_id = index.accounts.first().map(|s| s.id.clone());
+            }
+        }
+        
+        if let Err(e) = save_account_index(&index) {
+            crate::modules::logger::log_error(&format!("自动清理索引失败: {}", e));
+        } else {
+            crate::modules::logger::log_info("索引自动清理完成");
         }
     }
     
@@ -119,6 +159,7 @@ pub fn list_accounts() -> Result<Vec<Account>, String> {
 
 /// 添加账号
 pub fn add_account(email: String, name: Option<String>, token: TokenData) -> Result<Account, String> {
+    let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
     let mut index = load_account_index()?;
     
     // 检查是否已存在
@@ -155,6 +196,7 @@ pub fn add_account(email: String, name: Option<String>, token: TokenData) -> Res
 
 /// 添加或更新账号
 pub fn upsert_account(email: String, name: Option<String>, token: TokenData) -> Result<Account, String> {
+    let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
     let mut index = load_account_index()?;
     
     // 先找到账号 ID（如果存在）
@@ -198,11 +240,17 @@ pub fn upsert_account(email: String, name: Option<String>, token: TokenData) -> 
     }
     
     // 不存在则添加
+    // 注意：这里手动调用 add_account，它也会尝试获取锁，但因为 Mutex 库限制会死锁
+    // 所以我们需要一个不带锁的内部版本，或者重构。简单起见，这里直接展开添加逻辑或不重复加锁
+    
+    // 释放锁，让 add_account 处理
+    drop(_lock);
     add_account(email, name, token)
 }
 
 /// 删除账号
 pub fn delete_account(account_id: &str) -> Result<(), String> {
+    let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
     let mut index = load_account_index()?;
     
     // 从索引中移除
@@ -232,11 +280,45 @@ pub fn delete_account(account_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 批量删除账号 (原子性操作索引)
+pub fn delete_accounts(account_ids: &[String]) -> Result<(), String> {
+    let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
+    let mut index = load_account_index()?;
+    
+    let accounts_dir = get_accounts_dir()?;
+    
+    for account_id in account_ids {
+        // 从索引中移除
+        index.accounts.retain(|s| &s.id != account_id);
+        
+        // 如果是当前账号，清除当前账号
+        if index.current_account_id.as_deref() == Some(account_id) {
+            index.current_account_id = None;
+        }
+        
+        // 删除账号文件
+        let account_path = accounts_dir.join(format!("{}.json", account_id));
+        if account_path.exists() {
+            let _ = fs::remove_file(&account_path);
+        }
+    }
+    
+    // 如果当前账号为空，尝试选取第一个作为默认
+    if index.current_account_id.is_none() {
+        index.current_account_id = index.accounts.first().map(|s| s.id.clone());
+    }
+    
+    save_account_index(&index)
+}
+
 /// 切换当前账号
 pub async fn switch_account(account_id: &str) -> Result<(), String> {
     use crate::modules::{oauth, process, db};
     
-    let mut index = load_account_index()?;
+    let mut index = {
+        let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
+        load_account_index()?
+    };
     
     // 1. 验证账号存在
     if !index.accounts.iter().any(|s| s.id == account_id) {
@@ -281,8 +363,12 @@ pub async fn switch_account(account_id: &str) -> Result<(), String> {
     )?;
     
     // 6. 更新工具内部状态
-    index.current_account_id = Some(account_id.to_string());
-    save_account_index(&index)?;
+    {
+        let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
+        let mut index = load_account_index()?;
+        index.current_account_id = Some(account_id.to_string());
+        save_account_index(&index)?;
+    }
     
     account.update_last_used();
     save_account(&account)?;
@@ -298,6 +384,23 @@ pub async fn switch_account(account_id: &str) -> Result<(), String> {
 pub fn get_current_account_id() -> Result<Option<String>, String> {
     let index = load_account_index()?;
     Ok(index.current_account_id)
+}
+
+/// 获取当前激活账号的具体信息
+pub fn get_current_account() -> Result<Option<Account>, String> {
+    if let Some(id) = get_current_account_id()? {
+        Ok(Some(load_account(&id)?))
+    } else {
+        Ok(None)
+    }
+}
+
+/// 设置当前激活账号 ID
+pub fn set_current_account_id(account_id: &str) -> Result<(), String> {
+    let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
+    let mut index = load_account_index()?;
+    index.current_account_id = Some(account_id.to_string());
+    save_account_index(&index)
 }
 
 /// 更新账号配额

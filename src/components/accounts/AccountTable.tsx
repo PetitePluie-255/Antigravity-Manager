@@ -42,10 +42,10 @@ function AccountTable({ accounts, selectedIds, refreshingIds, onToggleSelect, on
                                 onChange={onToggleAll}
                             />
                         </th>
-                        <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.email')}</th>
-                        <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-96 whitespace-nowrap">{t('accounts.table.quota')}</th>
-                        <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.last_used')}</th>
-                        <th className="px-6 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.actions')}</th>
+                        <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.email')}</th>
+                        <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[440px] whitespace-nowrap">{t('accounts.table.quota')}</th>
+                        <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.last_used')}</th>
+                        <th className="px-4 py-1 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">{t('accounts.table.actions')}</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-base-200">

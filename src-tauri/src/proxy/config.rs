@@ -21,6 +21,14 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub anthropic_mapping: std::collections::HashMap<String, String>,
 
+    /// OpenAI 模型映射表 (key: OpenAI模型组, value: Gemini模型名)
+    #[serde(default)]
+    pub openai_mapping: std::collections::HashMap<String, String>,
+
+    /// 自定义精确模型映射表 (key: 原始模型名, value: 目标模型名)
+    #[serde(default)]
+    pub custom_mapping: std::collections::HashMap<String, String>,
+
     /// API 请求超时时间(秒)
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
@@ -47,6 +55,8 @@ impl Default for ProxyConfig {
             api_key: format!("sk-{}", uuid::Uuid::new_v4().simple()),
             auto_start: false,
             anthropic_mapping: std::collections::HashMap::new(),
+            openai_mapping: std::collections::HashMap::new(),
+            custom_mapping: std::collections::HashMap::new(),
             request_timeout: default_request_timeout(),
             upstream_proxy: UpstreamProxyConfig::default(),
         }

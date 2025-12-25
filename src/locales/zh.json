@@ -1,6 +1,8 @@
 {
     "common": {
         "loading": "加载中...",
+        "add": "添加",
+        "action": "操作",
         "save": "保存",
         "saved": "保存成功",
         "cancel": "取消",
@@ -20,7 +22,8 @@
         "clear": "清除",
         "prev_page": "上一页",
         "next_page": "下一页",
-        "pagination_info": "显示第 {{start}} 到 {{end}} 条，共 {{total}} 条"
+        "pagination_info": "显示第 {{start}} 到 {{end}} 条，共 {{total}} 条",
+        "accounts": "个账号"
     },
     "nav": {
         "dashboard": "仪表盘",
@@ -300,17 +303,60 @@
             "sonnet_thinking": "思维链",
             "opus_thinking": "最强思维"
         },
+        "router": {
+            "title": "模型路由中心 (Model Router)",
+            "subtitle": "按“规格家族”统一路由 OpenAI/Claude 模型，或添加最高优先级的“精确映射”。",
+            "original_id": "原始模型 ID",
+            "route_to": "路由目标",
+            "group_title": "模型家族分组 (Series Groups)",
+            "groups": {
+                "claude_45": {
+                    "name": "Claude 4.5 系列",
+                    "desc": "Opus 4.5, Sonnet 4.5 (推理)"
+                },
+                "claude_35": {
+                    "name": "Claude 3.5 系列",
+                    "desc": "Sonnet 3.5, Haiku 3.5"
+                },
+                "gpt_4": {
+                    "name": "GPT-4 / o1 系列",
+                    "desc": "GPT-4, Turbo, o1-preview"
+                },
+                "gpt_4o": {
+                    "name": "GPT-4o / 3.5 系列",
+                    "desc": "GPT-4o, Mini, 3.5 Turbo"
+                }
+            },
+            "expert_title": "专家精确映射 (Expert Custom Routing)",
+            "expert_subtitle": "精确匹配支持从任何协议传来的原始模型 ID。",
+            "reset_confirm": "确定要重置所有模型映射为系统默认吗？",
+            "reset_mapping": "重置映射",
+            "add_mapping": "添加映射 (Add Mapping)",
+            "current_list": "当前映射列表 (Custom List)",
+            "no_custom_mapping": "暂无自定义精确映射"
+        },
         "examples": {
             "title": "使用示例"
         },
         "multi_protocol": {
-            "title": "多协议支持",
-            "subtitle": "Multi-Protocol",
+            "title": "多协议支持 (Multi-Protocol Support)",
+            "subtitle": "协议支持",
             "description": "反代服务支持 OpenAI 和 Anthropic 两种 API 格式，满足不同工具需求",
             "openai_label": "OpenAI 协议",
             "anthropic_label": "Anthropic 协议",
-            "openai_tools": "Cursor, Windsurf, NextChat",
-            "anthropic_tools": "Claude Code CLI"
+            "openai_tools": "Cherry Studio, NextChat",
+            "anthropic_tools": "Claude Code CLI",
+            "gemini_label": "Gemini 协议",
+            "gemini_tools": "Google AI SDK, LangChain",
+            "quick_integration": "快速集成 (Quick Integration)",
+            "click_tip": "👆 点击左侧任意模型以更新代码"
+        },
+        "supported_models": {
+            "title": "支持模型与集成 (Supported Models & Integration)",
+            "model_name": "模型名称",
+            "model_id": "模型 ID",
+            "description": "描述",
+            "action": "操作"
         }
     }
 }

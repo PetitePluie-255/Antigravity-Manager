@@ -9,6 +9,8 @@ export interface ProxyConfig {
     api_key: string;
     auto_start: boolean;
     anthropic_mapping?: Record<string, string>;
+    openai_mapping?: Record<string, string>;
+    custom_mapping?: Record<string, string>;
     request_timeout: number;
     upstream_proxy: UpstreamProxyConfig;
 }

@@ -13,7 +13,7 @@ pub async fn list_accounts() -> Result<Vec<Account>, String> {
 
 /// 添加账号
 #[tauri::command]
-pub async fn add_account(_email: String, refresh_token: String) -> Result<Account, String> {
+pub async fn add_account(app: tauri::AppHandle, _email: String, refresh_token: String) -> Result<Account, String> {
     // 1. 使用 refresh_token 获取 access_token
     // 注意：这里我们忽略传入的 _email，而是直接去 Google 获取真实的邮箱
     let token_res = modules::oauth::refresh_access_token(&refresh_token).await?;
@@ -35,19 +35,40 @@ pub async fn add_account(_email: String, refresh_token: String) -> Result<Accoun
     let account = modules::upsert_account(user_info.email.clone(), user_info.get_display_name(), token)?;
     
     modules::logger::log_info(&format!("添加账号成功: {}", account.email));
+
+    // 5. 自动触发刷新额度
+    let mut account = account;
+    let _ = internal_refresh_account_quota(&app, &mut account).await;
     
     Ok(account)
 }
 
 /// 删除账号
 #[tauri::command]
-pub async fn delete_account(account_id: String) -> Result<(), String> {
+pub async fn delete_account(app: tauri::AppHandle, account_id: String) -> Result<(), String> {
     modules::logger::log_info(&format!("收到删除账号请求: {}", account_id));
     modules::delete_account(&account_id).map_err(|e| {
         modules::logger::log_error(&format!("删除账号失败: {}", e));
         e
     })?;
     modules::logger::log_info(&format!("账号删除成功: {}", account_id));
+    
+    // 强制同步托盘
+    crate::modules::tray::update_tray_menus(&app);
+    Ok(())
+}
+
+/// 批量删除账号
+#[tauri::command]
+pub async fn delete_accounts(app: tauri::AppHandle, account_ids: Vec<String>) -> Result<(), String> {
+    modules::logger::log_info(&format!("收到批量删除请求，共 {} 个账号", account_ids.len()));
+    modules::account::delete_accounts(&account_ids).map_err(|e| {
+        modules::logger::log_error(&format!("批量删除失败: {}", e));
+        e
+    })?;
+    
+    // 强制同步托盘
+    crate::modules::tray::update_tray_menus(&app);
     Ok(())
 }
 
@@ -76,6 +97,26 @@ pub async fn get_current_account() -> Result<Option<Account>, String> {
     } else {
         modules::logger::log_info("   No current account set");
         Ok(None)
+    }
+}
+
+/// 内部辅助功能：在添加或导入账号后自动刷新一次额度
+async fn internal_refresh_account_quota(app: &tauri::AppHandle, account: &mut Account) -> Result<QuotaData, String> {
+    modules::logger::log_info(&format!("自动触发刷新配额: {}", account.email));
+    
+    // 使用带重试的查询 (Shared logic)
+    match modules::account::fetch_quota_with_retry(account).await {
+        Ok(quota) => {
+            // 更新账号配额
+            let _ = modules::update_account_quota(&account.id, quota.clone());
+            // 更新托盘菜单
+            crate::modules::tray::update_tray_menus(app);
+            Ok(quota)
+        },
+        Err(e) => {
+            modules::logger::log_warn(&format!("自动刷新配额失败 ({}): {}", account.email, e));
+            Err(e.to_string())
+        }
     }
 }
 
@@ -176,7 +217,7 @@ pub async fn save_config(
     let instance_lock = proxy_state.instance.read().await;
     if let Some(instance) = instance_lock.as_ref() {
         // 更新模型映射
-        instance.axum_server.update_mapping(config.proxy.anthropic_mapping.clone()).await;
+        instance.axum_server.update_mapping(&config.proxy).await;
         // 更新上游代理
         instance.axum_server.update_proxy(config.proxy.upstream_proxy.clone()).await;
         tracing::info!("已同步热更新反代服务配置");
@@ -192,7 +233,7 @@ pub async fn start_oauth_login(app_handle: tauri::AppHandle) -> Result<Account, 
     modules::logger::log_info("开始 OAuth 授权流程...");
     
     // 1. 启动 OAuth 流程获取 Token
-    let token_res = modules::oauth_server::start_oauth_flow(app_handle).await?;
+    let token_res = modules::oauth_server::start_oauth_flow(app_handle.clone()).await?;
     
     // 2. 检查 refresh_token
     let refresh_token = token_res.refresh_token.ok_or_else(|| {
@@ -233,7 +274,12 @@ pub async fn start_oauth_login(app_handle: tauri::AppHandle) -> Result<Account, 
     
     // 6. 添加或更新到账号列表
     modules::logger::log_info("正在保存账号信息...");
-    modules::upsert_account(user_info.email.clone(), user_info.get_display_name(), token_data)
+    let mut account = modules::upsert_account(user_info.email.clone(), user_info.get_display_name(), token_data)?;
+
+    // 7. 自动触发刷新额度
+    let _ = internal_refresh_account_quota(&app_handle, &mut account).await;
+
+    Ok(account)
 }
 
 #[tauri::command]
@@ -245,14 +291,64 @@ pub async fn cancel_oauth_login() -> Result<(), String> {
 // --- 导入命令 ---
 
 #[tauri::command]
-pub async fn import_v1_accounts() -> Result<Vec<Account>, String> {
-    modules::migration::import_from_v1().await
+pub async fn import_v1_accounts(app: tauri::AppHandle) -> Result<Vec<Account>, String> {
+    let accounts = modules::migration::import_from_v1().await?;
+    
+    // 对导入的账号尝试刷新一波
+    for mut account in accounts.clone() {
+        let _ = internal_refresh_account_quota(&app, &mut account).await;
+    }
+
+    Ok(accounts)
 }
 
 #[tauri::command]
-pub async fn import_from_db() -> Result<Account, String> {
+pub async fn import_from_db(app: tauri::AppHandle) -> Result<Account, String> {
     // 同步函数包装为 async
-    modules::migration::import_from_db().await
+    let mut account = modules::migration::import_from_db().await?;
+
+    // 既然是从数据库导入（即 IDE 当前账号），自动将其设为 Manager 的当前账号
+    let account_id = account.id.clone();
+    modules::account::set_current_account_id(&account_id)?;
+    
+    // 自动触发刷新额度
+    let _ = internal_refresh_account_quota(&app, &mut account).await;
+    
+    // 刷新托盘图标展示
+    crate::modules::tray::update_tray_menus(&app);
+
+    Ok(account)
+}
+
+#[tauri::command]
+pub async fn sync_account_from_db(app: tauri::AppHandle) -> Result<Option<Account>, String> {
+    // 1. 获取 DB 中的 Refresh Token
+    let db_refresh_token = match modules::migration::get_refresh_token_from_db() {
+        Ok(token) => token,
+        Err(e) => {
+            modules::logger::log_info(&format!("自动同步跳过: {}", e));
+            return Ok(None);
+        }
+    };
+
+    // 2. 获取 Manager 当前账号
+    let curr_account = modules::account::get_current_account()?;
+    
+    // 3. 对比：如果 Refresh Token 相同，说明账号没变，无需导入
+    if let Some(acc) = curr_account {
+        if acc.token.refresh_token == db_refresh_token {
+            // 账号未变，由于已经是周期性任务，我们可以选择性刷新一下配额，或者直接返回
+            // 这里为了节省 API 流量，直接返回
+            return Ok(None);
+        }
+        modules::logger::log_info(&format!("检测到账号切换 ({} -> DB新账号)，正在同步...", acc.email));
+    } else {
+        modules::logger::log_info("检测到新登录账号，正在自动同步...");
+    }
+
+    // 4. 执行完整导入
+    let account = import_from_db(app).await?;
+    Ok(Some(account))
 }
 
 /// 保存文本文件 (绕过前端 Scope 限制)

@@ -25,8 +25,9 @@ function CurrentAccount({ account, onSwitch }: CurrentAccountProps) {
         );
     }
 
-    const geminiModel = account.quota?.models.find(m => m.name.toLowerCase().includes('gemini'));
-    const claudeModel = account.quota?.models.find(m => m.name.toLowerCase().includes('claude'));
+    const geminiProModel = account.quota?.models.find(m => m.name === 'gemini-3-pro-high');
+    const geminiFlashModel = account.quota?.models.find(m => m.name === 'gemini-3-flash');
+    const claudeModel = account.quota?.models.find(m => m.name === 'claude-sonnet-4-5-thinking');
 
     return (
         <div className="bg-white dark:bg-base-100 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-base-200 h-full flex flex-col">
@@ -35,35 +36,63 @@ function CurrentAccount({ account, onSwitch }: CurrentAccountProps) {
                 {t('dashboard.current_account')}
             </h2>
 
-            <div className="space-y-3 flex-1">
-                <div className="flex items-center gap-2 mb-2">
+            <div className="space-y-4 flex-1">
+                <div className="flex items-center gap-2 mb-1">
                     <Mail className="w-3.5 h-3.5 text-gray-400" />
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{account.email}</span>
                 </div>
 
-                {/* Gemini 配额 */}
-                {geminiModel && (
-                    <div className="space-y-1">
+                {/* Gemini Pro 配额 */}
+                {geminiProModel && (
+                    <div className="space-y-1.5">
                         <div className="flex justify-between items-baseline">
-                            <span className="text-xs text-gray-600 dark:text-gray-400">Gemini 3 Pro</span>
+                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Gemini 3 Pro</span>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`${t('accounts.reset_time')}: ${new Date(geminiModel.reset_time).toLocaleString()}`}>
-                                    {geminiModel.reset_time ? `R: ${formatTimeRemaining(geminiModel.reset_time)}` : t('common.unknown')}
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`${t('accounts.reset_time')}: ${new Date(geminiProModel.reset_time).toLocaleString()}`}>
+                                    {geminiProModel.reset_time ? `R: ${formatTimeRemaining(geminiProModel.reset_time)}` : t('common.unknown')}
                                 </span>
-                                <span className={`text-xs font-semibold ${geminiModel.percentage >= 50 ? 'text-green-600 dark:text-green-400' :
-                                    geminiModel.percentage >= 20 ? 'text-orange-600 dark:text-orange-400' : 'text-red-600 dark:text-red-400'
+                                <span className={`text-xs font-bold ${geminiProModel.percentage >= 50 ? 'text-emerald-600 dark:text-emerald-400' :
+                                    geminiProModel.percentage >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'
                                     }`}>
-                                    {geminiModel.percentage}%
+                                    {geminiProModel.percentage}%
                                 </span>
                             </div>
                         </div>
                         <div className="w-full bg-gray-100 dark:bg-base-300 rounded-full h-1.5 overflow-hidden">
                             <div
-                                className={`h-full rounded-full transition-all ${geminiModel.percentage >= 50 ? 'bg-gradient-to-r from-green-400 to-green-500' :
-                                    geminiModel.percentage >= 20 ? 'bg-gradient-to-r from-orange-400 to-orange-500' :
-                                        'bg-gradient-to-r from-red-400 to-red-500'
+                                className={`h-full rounded-full transition-all duration-700 ${geminiProModel.percentage >= 50 ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' :
+                                    geminiProModel.percentage >= 20 ? 'bg-gradient-to-r from-amber-400 to-amber-500' :
+                                        'bg-gradient-to-r from-rose-400 to-rose-500'
                                     }`}
-                                style={{ width: `${geminiModel.percentage}%` }}
+                                style={{ width: `${geminiProModel.percentage}%` }}
+                            ></div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Gemini Flash 配额 */}
+                {geminiFlashModel && (
+                    <div className="space-y-1.5">
+                        <div className="flex justify-between items-baseline">
+                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Gemini 3 Flash</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`${t('accounts.reset_time')}: ${new Date(geminiFlashModel.reset_time).toLocaleString()}`}>
+                                    {geminiFlashModel.reset_time ? `R: ${formatTimeRemaining(geminiFlashModel.reset_time)}` : t('common.unknown')}
+                                </span>
+                                <span className={`text-xs font-bold ${geminiFlashModel.percentage >= 50 ? 'text-emerald-600 dark:text-emerald-400' :
+                                    geminiFlashModel.percentage >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'
+                                    }`}>
+                                    {geminiFlashModel.percentage}%
+                                </span>
+                            </div>
+                        </div>
+                        <div className="w-full bg-gray-100 dark:bg-base-300 rounded-full h-1.5 overflow-hidden">
+                            <div
+                                className={`h-full rounded-full transition-all duration-700 ${geminiFlashModel.percentage >= 50 ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' :
+                                    geminiFlashModel.percentage >= 20 ? 'bg-gradient-to-r from-amber-400 to-amber-500' :
+                                        'bg-gradient-to-r from-rose-400 to-rose-500'
+                                    }`}
+                                style={{ width: `${geminiFlashModel.percentage}%` }}
                             ></div>
                         </div>
                     </div>
@@ -71,15 +100,15 @@ function CurrentAccount({ account, onSwitch }: CurrentAccountProps) {
 
                 {/* Claude 配额 */}
                 {claudeModel && (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                         <div className="flex justify-between items-baseline">
-                            <span className="text-xs text-gray-600 dark:text-gray-400">Claude 4.5</span>
+                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Claude 4.5</span>
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] text-gray-400 dark:text-gray-500" title={`${t('accounts.reset_time')}: ${new Date(claudeModel.reset_time).toLocaleString()}`}>
                                     {claudeModel.reset_time ? `R: ${formatTimeRemaining(claudeModel.reset_time)}` : t('common.unknown')}
                                 </span>
-                                <span className={`text-xs font-semibold ${claudeModel.percentage >= 50 ? 'text-cyan-600 dark:text-cyan-400' :
-                                    claudeModel.percentage >= 20 ? 'text-orange-600 dark:text-orange-400' : 'text-red-600 dark:text-red-400'
+                                <span className={`text-xs font-bold ${claudeModel.percentage >= 50 ? 'text-cyan-600 dark:text-cyan-400' :
+                                    claudeModel.percentage >= 20 ? 'text-orange-600 dark:text-orange-400' : 'text-rose-600 dark:text-rose-400'
                                     }`}>
                                     {claudeModel.percentage}%
                                 </span>
@@ -87,9 +116,9 @@ function CurrentAccount({ account, onSwitch }: CurrentAccountProps) {
                         </div>
                         <div className="w-full bg-gray-100 dark:bg-base-300 rounded-full h-1.5 overflow-hidden">
                             <div
-                                className={`h-full rounded-full transition-all ${claudeModel.percentage >= 50 ? 'bg-gradient-to-r from-cyan-400 to-cyan-500' :
+                                className={`h-full rounded-full transition-all duration-700 ${claudeModel.percentage >= 50 ? 'bg-gradient-to-r from-cyan-400 to-cyan-500' :
                                     claudeModel.percentage >= 20 ? 'bg-gradient-to-r from-orange-400 to-orange-500' :
-                                        'bg-gradient-to-r from-red-400 to-red-500'
+                                        'bg-gradient-to-r from-rose-400 to-rose-500'
                                     }`}
                                 style={{ width: `${claudeModel.percentage}%` }}
                             ></div>

@@ -1,234 +1,171 @@
-# Antigravity Tools (2API Edition) 🚀
+# Antigravity Tools 🚀
 
 <div align="center">
   <img src="public/icon.png" alt="Antigravity Logo" width="120" height="120" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
 
-  <h3>Your Personal API Gateway for Infinite AI</h3>
+  <h3>Your Personal High-Performance AI Dispatch Gateway</h3>
   <p>Seamlessly proxy Gemini & Claude. OpenAI-Compatible. Privacy First.</p>
   
   <p>
     <a href="https://github.com/lbjlaq/Antigravity-Manager">
-      <img src="https://img.shields.io/badge/version-v3.1.1-blue.svg" alt="Version">
+      <img src="https://img.shields.io/badge/Version-3.2.0-blue?style=flat-square" alt="Version">
     </a>
     <img src="https://img.shields.io/badge/Tauri-v2-orange?style=flat-square" alt="Tauri">
-    <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square" alt="React">
+    <img src="https://img.shields.io/badge/Backend-Rust-red?style=flat-square" alt="Rust">
+    <img src="https://img.shields.io/badge/Frontend-React-61DAFB?style=flat-square" alt="React">
     <img src="https://img.shields.io/badge/License-CC--BY--NC--SA--4.0-lightgrey?style=flat-square" alt="License">
   </p>
 
   <p>
-    <a href="#-Downloads">📥 Download</a> • 
-    <a href="#-Features">✨ Account Manager</a> • 
-    <a href="#-API-Proxy">🔌 API Proxy</a>
+    <a href="#-features">Features</a> • 
+    <a href="#-gui-overview">GUI Overview</a> • 
+    <a href="#-architecture">Architecture</a> • 
+    <a href="#-installation">Installation</a> • 
+    <a href="#-quick-integration">Integration</a>
   </p>
 
   <p>
-    <strong>🇺🇸 English</strong> | 
-    <a href="./README_v2.md">🇨🇳 简体中文 (Legacy v2)</a>
+    <a href="./README.md">简体中文</a> | 
+    <strong>English</strong>
   </p>
 </div>
 
 ---
 
-**Antigravity Tools 2.2** is a robust desktop application that transforms your desktop into a powerful **Local AI Gateway**.
+**Antigravity Tools** is an all-in-one desktop application designed for developers and AI enthusiasts. It perfectly combines multi-account management, protocol conversion, and smart request scheduling to provide you with a stable, high-speed, and low-cost **Local AI Relay Station**.
 
-It not only manages your Gemini / Claude accounts but also provides a **local OpenAI-compatible API server**. This allows you to use your browser-based Google/Claude sessions (`sid`, `__Secure-1PSID`, etc.) as standard API keys in any AI application (Cursor, Windsurf, LangChain, etc.).
+By leveraging this app, you can transform common Web Sessions (Google/Anthropic) into standardized API interfaces, completely eliminating the protocol gap between different providers.
 
-> **Looking for the Account Manager Only version?**
-> The v2.0 Account Manager documentation has been moved to [README_v2.md](./README_v2.md).
+## 🌟 Detailed Feature Matrix
 
-## 🔌 API Proxy: In-Depth
+### 1. 🎛️ Smart Account Dashboard
+*   **Global Real-time Monitoring**: Instant insight into the health of all accounts, including average remaining quotas for Gemini Pro, Gemini Flash, Claude, and Gemini Image generation.
+*   **Smart Recommendation**: The system uses a real-time algorithm to filter and recommend the "Best Account" based on quota redundancy, supporting **one-click switching**.
+*   **Active Account Snapshot**: Visually displays the specific quota percentage and the last synchronization time of the currently active account.
 
-Antigravity's proxy is not just a forwarder, but a complete **Local AI Scheduler**.
+### 2. 🔐 Powerful Account Manager
+*   **OAuth 2.0 Auto Authorization**: Integrated browser automation flow. Simply log in to your Google account, and the app will automatically extract and persist the Refresh Token.
+*   **Multi-dimensional Import**: Supports single token entry, JSON batch import, and automatic hot migration from V1 legacy databases.
+*   **Gateway-level Views**: Supports switching between "List" and "Grid" views. Provides 403 Forbidden detection, automatically marking and skipping accounts with permission anomalies.
 
-<div align="center">
-  <img src="docs/images/v3/proxy-settings.png" width="100%" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-</div>
+### 3. � Protocol Conversion & Relay (API Proxy)
+*   **Multi-Protocol Adaptation (Multi-Sink)**:
+    *   **OpenAI Format**: Provides `/v1/chat/completions` endpoint, compatible with 99% of existing AI apps.
+    *   **Anthropic Format**: Provides native `/v1/messages` interface, supporting all features of **Claude Code CLI** (e.g., chain-of-thought, system prompts).
+    *   **Gemini Format**: Supports direct calls from official Google AI SDKs.
+*   **Smart Self-healing**: When a request encounters `429 (Too Many Requests)` or `401 (Expired)`, the backend triggers **millisecond-level automatic retry and silent rotation**, ensuring business continuity.
 
-### 1. 🔄 Smart Account Rotation
-When you have multiple accounts:
-- **Load Balancing**: Requests are distributed across healthy accounts.
-- **Auto Failover**: If an account hits `429` (Rate Limit), the system **instantly** switches to the next account and retries.
-- **Quota Awareness**: Exhausted accounts are automatically skipped.
+### 4. 🔀 Model Router Center
+*   **Series-based Mapping**: Classify complex original model IDs into "Series Groups" (e.g., routing all GPT-4 requests uniformly to `gemini-3-pro-high`).
+*   **Expert Redirection**: Supports custom regex-level model mapping for precise control over every request's landing model.
 
-### 2. 🧠 Perfect Context
-Fully compatible with OpenAI's `messages` format. Multi-turn conversations work seamlessly in apps like Cursor, Windsurf, or NextChat.
+### 5. 🎨 Multimodal & Imagen 3 Support
+*   **Advanced Image Control**: Supports precise control over image generation tasks via OpenAI `size` (e.g., `1024x1024`, `16:9`) parameters or model name suffixes.
+*   **Enhanced Payload Support**: The backend supports payloads up to **100MB**, more than enough for 4K HD image recognition and processing.
 
-<div align="center">
-  <img src="docs/images/v3/proxy-chat-demo.png" width="80%" style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-</div>
+## � GUI Overview
 
-### 3. 🔗 Multi-Protocol Support (NEW!)
+````carousel
+![Dashboard - Global Quota Monitoring & One-click Switch](docs/images/dashboard-light.png)
+<!-- slide -->
+![Account List - High-density Quota Display & Smart 403 Labeling](docs/images/accounts-light.png)
+<!-- slide -->
+![About Page - About Antigravity Tools](docs/images/about-dark.png)
+<!-- slide -->
+![API Proxy - Service Control](docs/images/v3/proxy-settings.png)
+<!-- slide -->
+![Settings - General Config](docs/images/settings-dark.png)
+````
 
-Supports both **OpenAI** and **Anthropic API** formats:
-- **OpenAI Protocol**: `/v1/chat/completions` - Compatible with Cursor, Windsurf, NextChat, etc.
-- **Anthropic Protocol**: `/v1/messages` - Native support for Claude Code CLI and other tools
-- **Auto Conversion**: Automatically converts requests to Gemini format for perfect compatibility
+## 🏗️ Architecture
 
-<details>
-<summary>📘 Claude Code CLI Setup Guide</summary>
-
-#### Quick Setup
-
-**Temporary Use** (run each time you open terminal):
-```bash
-export ANTHROPIC_API_KEY="sk-antigravity"  # Use the API Key from the app
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8045"
-claude "write a quicksort algorithm"
+```mermaid
+graph TD
+    Client([External Apps: Claude Code/NextChat]) -->|OpenAI/Anthropic| Gateway[Antigravity Axum Server]
+    Gateway --> Middleware[Middleware: Auth/Rate Limit/Logs]
+    Middleware --> Router[Model Router: ID Mapping]
+    Router --> Dispatcher[Dispatcher: Rotation/Weights]
+    Dispatcher --> Mapper[Request Mapper]
+    Mapper --> Upstream[Upstream: Google/Anthropic API]
+    Upstream --> ResponseMapper[Response Mapper]
+    ResponseMapper --> Client
 ```
 
-**Permanent Setup** (one-time configuration):
-```bash
-# Edit config file (macOS/Linux)
-nano ~/.zshrc
+## 📥 Installation
 
-# Add these lines to the end
+### Option A: macOS Terminal (Recommended)
+If you have [Homebrew](https://brew.sh/) installed, run:
+
+```bash
+# 1. Tap the repository
+brew tap lbjlaq/antigravity-manager https://github.com/lbjlaq/Antigravity-Manager
+
+# 2. Install the app
+brew install --cask antigravity-tools
+# If you encounter permission issues
+brew install --cask --no-quarantine antigravity
+```
+
+### Option B: Manual Download
+Download from [GitHub Releases](https://github.com/lbjlaq/Antigravity-Manager/releases):
+*   **macOS**: `.dmg` (Universal, Apple Silicon & Intel)
+*   **Windows**: `.msi` or portable `.zip`
+*   **Linux**: `.deb` or `AppImage`
+
+### 🛠️ Troubleshooting
+
+#### macOS says "App is damaged"?
+Due to macOS security gatekeeper, non-App Store apps might show this. Run this in Terminal to fix:
+```bash
+sudo xattr -rd com.apple.quarantine "/Applications/Antigravity Tools.app"
+```
+
+## 🔌 Quick Integration Examples
+
+### How to use with Claude Code CLI?
+1. Start Antigravity service in the "API Proxy" tab.
+2. In your terminal:
+```bash
 export ANTHROPIC_API_KEY="sk-antigravity"
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8045"
-
-# Reload config
-source ~/.zshrc
+claude
 ```
 
-#### Usage Examples
+### How to use in Python?
+```python
+import openai
 
-```bash
-# Basic conversation
-claude "what is 1+1"
+client = openai.OpenAI(
+    api_key="sk-antigravity",
+    base_url="http://127.0.0.1:8045/v1"
+)
 
-# Multi-turn conversation
-claude "what did I just ask"
-
-# Code generation
-claude "write a quicksort in Python"
+response = client.chat.completions.create(
+    model="gemini-3-flash",
+    messages=[{"role": "user", "content": "Hello, please introduce yourself"}]
+)
+print(response.choices[0].message.content)
 ```
 
-#### Notes
+## 📝 Developer & Community
 
-1. **Ensure Service Running**: Make sure Antigravity API Proxy is running before use
-2. **API Key**: Copy the generated API Key from "API Proxy" page
-3. **Port Configuration**: Default port is 8045, update `ANTHROPIC_BASE_URL` if changed
-
-</details>
-
-### 3. Connect
-
-<div align="center">
-
-| **Gemini 3 Pro Image (Imagen 3)** | **Claude 3.5 Sonnet (Thinking)** |
-| :---: | :---: |
-| <img src="docs/images/v3/gemini-image-edit.jpg" width="100%" style="border-radius: 8px;"> | <img src="docs/images/v3/claude-code-gen.png" width="100%" style="border-radius: 8px;"> |
-| **NextChat - Image Gen/Edit** | **Windsurf/Cursor - Complex Coding** |
-
-</div>
-
-### 👥 Account Manager
-- **Token Management**: Manage dozens of Gemini/Claude accounts.
-- **Auto-Refresh**: Keeps your tokens alive automatically.
-- **Quota Monitoring**: Real-time visualization of model quotas (Text & Image).
-- **Account Switching**: One-click token injection into local Antigravity database for seamless switching.
-
-### 🛡️ Privacy First
-- **Local Storage**: All data inside `gui_config.json` and `antigravity.db` stays on your machine.
-- **No Cloud**: We do not run any intermediary servers. Your data goes directly from your machine to Google/Anthropic.
-
-## 🛠️ Technology Stack
-
-| Component | Tech |
-| :--- | :--- |
-| **Core** | Rust (Tauri v2) |
-| **API Server** | Axum (Rust) |
-| **Frontend** | React + TailwindCSS |
-| **Database** | SQLite + JSON |
-
-## 📦 Usage
-
-1. **Add Accounts**: Login via OAuth or paste tokens in the "Accounts" tab.
-2. **Start Proxy**: Go to "API Proxy" tab and click **Start Service**.
-3. **Connect**: 
-   - Base URL: `http://localhost:8045/` (Some apps need `http://localhost:8045/v1`)
-   - API Key: `sk-antigravity` (Any string)
-   - Model: Select from the list below:
-
-#### 📚 Supported Models
-
-| Model ID | Description |
-| :--- | :--- |
-| **gemini-2.5-flash** | **Flash 2.5**. Extremely fast and cost-effective. |
-| **gemini-2.5-flash-thinking** | **Flash Thinking**. Lightweight model with reasoning capabilities. |
-| **gemini-3-pro-high** | **Gemini 3 Pro**. Google's strongest reasoning model. |
-| **gemini-3-pro-low** | **Gemini 3 Pro (Low)**. Lower quota consumption version. |
-| **gemini-3-pro-image** | **Imagen 3**. Dedicated image generation model. |
-| **claude-sonnet-4-5** | **Claude 3.5 Sonnet**. Top choice for coding and logic. |
-| **claude-sonnet-4-5-thinking** | **Sonnet Thinking**. Sonnet with chain-of-thought enabled. |
-| **claude-opus-4-5-thinking** | **Opus Thinking**. Claude's most powerful thinking model. |
-
-> 💡 **Tip**: The proxy supports pass-through for all official Google/Anthropic model IDs.
-
-## 🔄 Changelog
-
-### v3.1.1 (2025-12-18)
-
-#### 🌐 Global Upstream Proxy Support
-- **System-wide Proxy Integration**: Added support for global upstream proxies (HTTP/SOCKS5). When enabled, all outgoing requests (API proxy, token refresh, quota checks, update checks) are routed through the configured proxy.
-- **One-Click Hot-Reloading**: 
-  - Proxy settings and model mappings take effect **instantly** upon saving.
-  - The running proxy server automatically reloads configuration without requiring a restart.
-- **Backend Architecture Optimization**: 
-  - Centralized HTTP client management for improved connection stability.
-  - Thread-safe dynamic configuration sharing via `Arc<RwLock>`.
-- **UI Improvements**: Added a dedicated "Proxy" tab in Settings for better configuration management.
-
-#### 🧹 Code Quality & Cleanup
-- Fixed compiler warnings regarding unused fields in `server.rs`.
-- Removed redundant code and outdated imports to improve performance.
-
-### v3.1.0 (2025-12-18)
-
-#### 🔧 API Proxy Optimizations
-- **403 Error Smart Handling**: Instantly identifies and marks accounts with 403 Forbidden, no more retries
-  - Auto-marks as "forbidden" status
-  - Auto-skips 403 accounts during batch refresh
-  - Saves 3+ seconds response time
-
-### v3.0.2 (2025-12-17)
-
-#### 🔧 API Proxy Optimizations
-- **403 Error Smart Handling**: Instantly identifies and marks accounts with 403 Forbidden, no more retries
-  - Auto-marks as "forbidden" status
-  - Auto-skips 403 accounts during batch refresh
-  - Saves 3+ seconds response time
-
-- **Claude CLI Response Optimization**: Fixed empty response and JSON format issues
-  - Increased `maxOutputTokens` from 8096 to 16384 for longer responses
-  - Removed `toolConfig` to avoid MALFORMED_FUNCTION_CALL errors
-  - Added detailed diagnostic logs recording raw Gemini responses
-
-- **Logging System Enhancement**:
-  - Records full candidates data for empty text responses
-  - Increased log display length from 60 to 100 characters
-  - Distinguished log levels for empty vs normal responses
-
-#### 🐛 Bug Fixes
-- **OAuth Environment Check Optimization**: Simplified Tauri environment check, only validates `invoke` function availability
-  - Removed `window.__TAURI__` check
-  - Avoids false positives in certain Tauri versions
-
-### v3.0.1 (2025-12-17)
-
-#### 🔧 Bug Fixes
-- **macOS Process Termination Refactor (Critical)**: Completely resolved the "Unexpected Termination" dialog issue during account switching on macOS. We rewrote the process detection algorithm to intelligently identify the main process based on process arguments and characteristics (filtering out Helpers), enabling a 100% graceful exit via targeted SIGTERM, while maintaining a safety fallback for force cleanup.
-- **Image Generation Optimization**: Added support for `gemini-3-pro-image` and various aspect ratio suffixes (e.g., `-1:1`, `-16:9`). New models: `gemini-3-pro-image-4x3`, `gemini-3-pro-image-3x4`, `gemini-3-pro-image-4k`, `gemini-3-pro-image-16x9-4k`
-  - Parameter support: `size` now accepts `1024x768` (4:3) and `768x1024` (3:4)
-  - 4K HD support: via `-4k` suffix or `"quality": "hd"` parameter
-
-### v3.0.0 (2025-12-16)
-- 🚀 Initial API Proxy release
-- 🔌 Built-in high-performance Rust proxy server
-- 🔄 Smart account rotation and auto-failover
-- 🧠 Full OpenAI protocol compatibility
-- 🖼️ Gemini Imagen 3 image generation support
+*   **Changelog**:
+    *   **v3.2.0 (2025-12-24)**:
+        - **Core Architecture Refactor**:
+            - **Proxy Engine Rewrite**: Completely modularized `proxy` subsystem with decoupled `mappers`, `handlers`, and `middleware` for superior maintainability.
+            - **Linux Process Management (Beta)**: Addressed process termination issues on Linux (currently in beta). Implemented smart process identification to distinguish Main/Helper processes, ensuring graceful exit via `SIGTERM` with `SIGKILL` fallback.
+        - **Homebrew Support**: Official support for macOS one-click installation via `brew install --cask antigravity`.
+        - **GUI UX Revolution**: Revamped Dashboard with average quota monitoring and "Best Account Recommendation" algorithm.
+        - **Protocol & Router Expansion**: Native support for OpenAI, Anthropic (Claude Code), and Gemini protocols with high-precision Model Router.
+        - **Multimodal Optimization**: Deep adaptation for Imagen 3 with 100MB payload capacity and aspect ratio controls.
+        - **Global Upstream Proxy**: Centralized request management supporting HTTP/SOCKS5 with hot-reloading.
+    *   See [Releases](https://github.com/lbjlaq/Antigravity-Manager/releases) for earlier history.
+*   **License**: **CC BY-NC-SA 4.0**. Strictly for non-commercial use.
+*   **Security**: All account data is encrypted and stored locally in a SQLite database. Data never leaves your device unless sync is enabled.
 
 ---
 
-## 📄 License
-CC BY-NC-SA 4.0
+<div align="center">
+  <p>If you find this tool helpful, please give it a ⭐️ on GitHub!</p>
+  <p>Copyright © 2025 Antigravity Team.</p>
+</div>

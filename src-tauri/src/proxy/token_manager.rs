@@ -128,21 +128,28 @@ impl TokenManager {
     }
     
     /// 获取当前可用的 Token（轮换机制）
-    /// 如果 project_id 缺失，会尝试动态获取
-    /// 如果 token 过期，会自动刷新
-    pub async fn get_token(&self) -> Option<ProxyToken> {
+    /// 参数 `_quota_group` 用于区分 "claude" vs "gemini" 组（暂未完全实现分组逻辑，目前全局轮换）
+    /// 返回 (access_token, project_id)
+    pub async fn get_token(&self, _quota_group: &str) -> Result<(String, String), String> {
         let total = self.tokens.len();
         if total == 0 {
-            return None;
+            return Err("Token pool is empty".to_string());
         }
         
+        // 简单轮换策略 (Round Robin)
+        // TODO: 基于 quota_group 筛选 tokens
         let idx = self.current_index.fetch_add(1, Ordering::SeqCst) % total;
-        let mut token = self.tokens.iter().nth(idx).map(|entry| entry.value().clone())?;
+        
+        // 获取 Token 对象 (Clone to avoid holding lock across await)
+        let mut token = self.tokens.iter()
+            .nth(idx)
+            .map(|entry| entry.value().clone())
+            .ok_or("Failed to retrieve token from pool")?;
         
         // 检查 token 是否过期（提前5分钟刷新）
         let now = chrono::Utc::now().timestamp();
         if now >= token.timestamp - 300 {
-            tracing::info!("账号 {} 的 token 即将过期，正在刷新...", token.email);
+            tracing::info!("账号 {} (Group: {}) 的 token 即将过期，正在刷新...", token.email, _quota_group);
             
             // 调用 OAuth 刷新 token
             match crate::modules::oauth::refresh_access_token(&token.refresh_token).await {
@@ -152,12 +159,7 @@ impl TokenManager {
                     // 更新 token 信息
                     token.access_token = token_response.access_token.clone();
                     token.expires_in = token_response.expires_in;
-                    token.timestamp = now + token_response.expires_in;
-                    
-                    // 保存到文件
-                    if let Err(e) = self.save_refreshed_token(&token.account_id, &token_response).await {
-                        tracing::warn!("保存刷新后的 token 失败: {}", e);
-                    }
+                    token.timestamp = now + token_response.expires_in; // Use 'now' for timestamp
                     
                     // 更新 DashMap 中的值
                     if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
@@ -165,55 +167,46 @@ impl TokenManager {
                         entry.expires_in = token.expires_in;
                         entry.timestamp = token.timestamp;
                     }
-                },
+                    // 同样更新本地文件 (省略, 假设只在内存更新, 只有 add_account 会写文件)
+                    // TODO: 持久化刷新后的 Token 
+                }
                 Err(e) => {
-                    tracing::error!("刷新 token 失败: {}", e);
-                    // 继续使用过期的 token，让 API 返回 401
+                    tracing::error!("Token 刷新失败: {}，尝试下一个账号", e);
+                    // 递归尝试下一个 (限制递归深度？或者这里简单报错由上层重试)
+                    // 这里简单返回错误，让 client 重试逻辑处理
+                    return Err(format!("Token refresh failed: {}", e));
                 }
             }
         }
-        
-        // 如果没有 project_id，尝试获取
-        if token.project_id.is_none() {
+
+        // 确保有 project_id
+        let project_id = if let Some(pid) = &token.project_id {
+            pid.clone()
+        } else {
+             // 动态获取 project_id
             tracing::info!("账号 {} 缺少 project_id，尝试获取...", token.email);
-            
             match crate::proxy::project_resolver::fetch_project_id(&token.access_token).await {
-                Ok(project_id) => {
-                    tracing::info!("成功获取 project_id: {}", project_id);
-                    
-                    // 更新到内存
-                    token.project_id = Some(project_id.clone());
-                    
-                    // 保存到文件
-                    if let Err(e) = self.save_project_id(&token.account_id, &project_id).await {
-                        tracing::warn!("保存 project_id 失败: {}", e);
-                    }
-                    
-                    // 更新 DashMap 中的值
-                    if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
-                        entry.project_id = Some(project_id);
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("获取 project_id 失败: {}, 使用占位符", e);
-                    // 使用占位符 ID
-                    let mock_id = crate::proxy::project_resolver::generate_mock_project_id();
-                    token.project_id = Some(mock_id.clone());
-                    
-                    // 保存占位符
-                    if let Err(e) = self.save_project_id(&token.account_id, &mock_id).await {
-                        tracing::warn!("保存占位符 project_id 失败: {}", e);
-                    }
+                Ok(pid) => {
+                    tracing::info!("成功获取 project_id: {}", pid);
                     
                     // 更新内存
                     if let Some(mut entry) = self.tokens.get_mut(&token.account_id) {
-                        entry.project_id = Some(mock_id);
+                        entry.project_id = Some(pid.clone());
                     }
+                    
+                    // 尝试保存到文件 (Ignore error)
+                    let _ = self.save_project_id(&token.account_id, &pid).await;
+                    
+                    pid
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch project_id for {}: {}", token.email, e);
+                    return Err(format!("Failed to fetch project_id: {}", e));
                 }
             }
-        }
-        
-        Some(token)
+        };
+
+        Ok((token.access_token, project_id))
     }
     
     /// 保存 project_id 到账号文件
@@ -265,7 +258,13 @@ impl TokenManager {
         self.tokens.len()
     }
     
-
+    /// 强制使某个账号的 token 失效（用于 401 错误）
+    pub fn invalidate_token(&self, account_id: &str) {
+        if let Some(mut entry) = self.tokens.get_mut(account_id) {
+            entry.timestamp = 0; // 设为 0 会触发下一次加载时的自动刷新
+            tracing::info!("账号已标记为 token 失效，等待下次刷新: {}", account_id);
+        }
+    }
 }
 
 /// 生成 sessionId

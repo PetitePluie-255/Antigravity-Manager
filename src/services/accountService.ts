@@ -20,6 +20,10 @@ export async function deleteAccount(accountId: string): Promise<void> {
   return await apiCall("delete_account", { accountId });
 }
 
+export async function deleteAccounts(accountIds: string[]): Promise<void> {
+    return await invoke('delete_accounts', { accountIds });
+}
+
 export async function switchAccount(accountId: string): Promise<void> {
   return await apiCall("switch_account", { accountId });
 }
@@ -69,4 +73,8 @@ export async function importFromDb(): Promise<Account> {
     throw new Error("从 IDE 数据库导入仅在桌面应用中可用。");
   }
   return await apiCall("import_from_db");
+}
+
+export async function syncAccountFromDb(): Promise<Account | null> {
+    return await invoke('sync_account_from_db');
 }

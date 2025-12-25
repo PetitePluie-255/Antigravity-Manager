@@ -41,8 +41,16 @@ pub fn is_antigravity_running() -> bool {
 
         #[cfg(target_os = "linux")]
         {
-            if name == "antigravity" || exe_path.contains("antigravity") {
+            // 匹配进程名或可执行文件名 (忽略大小写)
+            if name.contains("antigravity") {
                 return true;
+            }
+            if let Some(exe) = process.exe() {
+                if let Some(file_name) = exe.file_name() {
+                    if file_name.to_string_lossy().to_lowercase() == "antigravity" {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -88,7 +96,17 @@ fn get_antigravity_pids() -> Vec<u32> {
         #[cfg(target_os = "linux")]
         {
             let name = process.name().to_string_lossy().to_lowercase();
-            if name == "antigravity" || exe_path.contains("antigravity") {
+            let is_match = if name.contains("antigravity") {
+                true
+            } else if let Some(exe) = process.exe() {
+                exe.file_name()
+                    .map(|f| f.to_string_lossy().to_lowercase() == "antigravity")
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if is_match {
                 pids.push(pid.as_u32());
             }
         }
@@ -238,14 +256,55 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        // Linux: 使用 PID 精确控制
+        // Linux: 同样尝试识别主进程并委派退出
         let pids = get_antigravity_pids();
         if !pids.is_empty() {
-            let pid = pids[0]; // 使用第一个找到的进程
-            crate::modules::logger::log_info(&format!("尝试优雅关闭进程 {} (SIGTERM)", pid));
-            let _ = Command::new("kill")
-                .args(["-15", &pid.to_string()])
-                .output();
+            let mut system = System::new();
+            system.refresh_processes(sysinfo::ProcessesToUpdate::All);
+            
+            let mut main_pid = None;
+            
+            crate::modules::logger::log_info("正在分析 Linux 进程列表以识别主进程:");
+            for pid_u32 in &pids {
+                let pid = sysinfo::Pid::from_u32(*pid_u32);
+                if let Some(process) = system.process(pid) {
+                    let name = process.name().to_string_lossy();
+                    let args = process.cmd();
+                    let args_str = args.iter()
+                        .map(|arg| arg.to_string_lossy().into_owned())
+                        .collect::<Vec<String>>()
+                        .join(" ");
+                    
+                    crate::modules::logger::log_info(&format!(" - PID: {} | Name: {} | Args: {}", pid_u32, name, args_str));
+                    
+                    // 识别主进程：不带 --type= 参数且名字不包含 helper
+                    let is_helper = args_str.contains("--type=") 
+                        || name.to_lowercase().contains("helper")
+                        || name.to_lowercase().contains("crashpad");
+                        
+                    if !is_helper {
+                        if main_pid.is_none() {
+                            main_pid = Some(pid_u32);
+                            crate::modules::logger::log_info(&format!("   => 识别为主进程"));
+                        }
+                    } else {
+                        crate::modules::logger::log_info(&format!("   => 识别为辅助进程"));
+                    }
+                }
+            }
+
+            // 阶段 1: 优雅退出 (SIGTERM)
+            if let Some(pid) = main_pid {
+                crate::modules::logger::log_info(&format!("尝试优雅关闭主进程 {} (SIGTERM)", pid));
+                let _ = Command::new("kill")
+                    .args(["-15", &pid.to_string()])
+                    .output();
+            } else {
+                crate::modules::logger::log_warn("未识别出明确的 Linux 主进程，将对所有关联进程发送 SIGTERM");
+                for pid in &pids {
+                    let _ = Command::new("kill").args(["-15", &pid.to_string()]).output();
+                }
+            }
             
             // 等待优雅退出
             let graceful_timeout = (timeout_secs * 7) / 10;
@@ -258,18 +317,23 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                 thread::sleep(Duration::from_millis(500));
             }
             
-            // 强制杀死
+            // 阶段 2: 强制杀死 (SIGKILL) - 针对全量残留进程
             if is_antigravity_running() {
-                crate::modules::logger::log_warn(&format!("优雅关闭超时，强制杀死进程 {} (SIGKILL)", pid));
-                let _ = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .output();
-                thread::sleep(Duration::from_secs(1));
+                let remaining_pids = get_antigravity_pids();
+                if !remaining_pids.is_empty() {
+                    crate::modules::logger::log_warn(&format!("优雅关闭超时，强制杀死 {} 个残留进程 (SIGKILL)", remaining_pids.len()));
+                    for pid in &remaining_pids {
+                        let _ = Command::new("kill")
+                            .args(["-9", &pid.to_string()])
+                            .output();
+                    }
+                    thread::sleep(Duration::from_secs(1));
+                }
             }
         } else {
-            crate::modules::logger::log_warn("未找到 Antigravity 进程 PID，尝试使用 pkill");
+            crate::modules::logger::log_warn("未找到 Antigravity 进程，尝试使用 pkill (Case-Insensitive) 回退");
             let _ = Command::new("pkill")
-                .args(["-9", "antigravity"])
+                .args(["-i", "-9", "antigravity"])
                 .output();
             thread::sleep(Duration::from_secs(1));
         }

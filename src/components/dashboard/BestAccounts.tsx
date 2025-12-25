@@ -14,10 +14,15 @@ function BestAccounts({ accounts, currentAccountId, onSwitch }: BestAccountsProp
     // 1. 获取按配额排序的列表 (排除当前账号)
     const geminiSorted = accounts
         .filter(a => a.id !== currentAccountId)
-        .map(a => ({
-            ...a,
-            quotaVal: a.quota?.models.find(m => m.name.toLowerCase().includes('gemini'))?.percentage || 0,
-        }))
+        .map(a => {
+            const proQuota = a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-high')?.percentage || 0;
+            const flashQuota = a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-flash')?.percentage || 0;
+            // 综合评分：Pro 权重更高 (70%)，Flash 权重 30%
+            return {
+                ...a,
+                quotaVal: Math.round(proQuota * 0.7 + flashQuota * 0.3),
+            };
+        })
         .filter(a => a.quotaVal > 0)
         .sort((a, b) => b.quotaVal - a.quotaVal);
 

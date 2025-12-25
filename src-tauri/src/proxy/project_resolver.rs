@@ -3,7 +3,7 @@ use serde_json::Value;
 /// 使用 Antigravity 的 loadCodeAssist API 获取 project_id
 /// 这是获取 cloudaicompanionProject 的正确方式
 pub async fn fetch_project_id(access_token: &str) -> Result<String, String> {
-    let url = "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:loadCodeAssist";
+    let url = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
     
     let request_body = serde_json::json!({
         "metadata": {
@@ -15,7 +15,7 @@ pub async fn fetch_project_id(access_token: &str) -> Result<String, String> {
     let response = client
         .post(url)
         .bearer_auth(access_token)
-        .header("Host", "daily-cloudcode-pa.sandbox.googleapis.com")
+        .header("Host", "cloudcode-pa.googleapis.com")
         .header("User-Agent", "antigravity/1.11.9 windows/amd64")
         .header("Content-Type", "application/json")
         .json(&request_body)

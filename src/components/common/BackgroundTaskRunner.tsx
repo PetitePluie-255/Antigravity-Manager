@@ -4,7 +4,7 @@ import { useAccountStore } from '../../stores/useAccountStore';
 
 function BackgroundTaskRunner() {
     const { config } = useConfigStore();
-    const { refreshAllQuotas, fetchCurrentAccount } = useAccountStore();
+    const { refreshAllQuotas } = useAccountStore();
 
     // Use refs to track previous state to detect "off -> on" transitions
     const prevAutoRefreshRef = useRef(false);
@@ -46,19 +46,20 @@ function BackgroundTaskRunner() {
 
         let intervalId: ReturnType<typeof setTimeout> | null = null;
         const { auto_sync, sync_interval } = config;
+        const { syncAccountFromDb } = useAccountStore.getState();
 
         // Check if we just turned it on
         if (auto_sync && !prevAutoSyncRef.current) {
             console.log('[BackgroundTask] Auto-sync enabled, executing immediately...');
-            fetchCurrentAccount();
+            syncAccountFromDb();
         }
         prevAutoSyncRef.current = auto_sync;
 
         if (auto_sync && sync_interval > 0) {
             console.log(`[BackgroundTask] Starting auto-sync account timer: ${sync_interval} seconds`);
             intervalId = setInterval(() => {
-                console.log('[BackgroundTask] Auto-syncing current account...');
-                fetchCurrentAccount();
+                console.log('[BackgroundTask] Auto-syncing current account from DB...');
+                syncAccountFromDb();
             }, sync_interval * 1000);
         }
 

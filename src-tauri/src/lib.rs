@@ -78,6 +78,7 @@ pub fn run() {
             commands::list_accounts,
             commands::add_account,
             commands::delete_account,
+            commands::delete_accounts,
             commands::switch_account,
             commands::get_current_account,
             // 配额命令
@@ -91,6 +92,7 @@ pub fn run() {
             commands::cancel_oauth_login,
             commands::import_v1_accounts,
             commands::import_from_db,
+            commands::sync_account_from_db,
             commands::save_text_file,
             commands::clear_log_cache,
             commands::open_data_folder,
