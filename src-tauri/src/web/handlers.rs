@@ -724,6 +724,7 @@ pub struct ImportDatabaseRequest {
 }
 
 /// 从数据库导入账号
+#[cfg(feature = "web-server")]
 pub async fn import_from_database(
     State(state): State<Arc<WebAppState>>,
     Json(req): Json<ImportDatabaseRequest>,

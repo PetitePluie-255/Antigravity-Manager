@@ -509,7 +509,9 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
     }
 
     // 2. 尝试查询
-    let result = modules::fetch_quota(&account.token.access_token).await;
+    let result = modules::fetch_quota(&account.token.access_token)
+        .await
+        .map(|(q, _)| q);
 
     // 3. 处理 401 错误 (Handle 401)
     if let Err(AppError::Network(ref e)) = result {
@@ -563,7 +565,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                         }
                     }
                 }
-                return retry_result;
+                return retry_result.map(|(q, _)| q);
             }
         }
     }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 /// 构建 API 路由
 pub fn build_routes(state: Arc<WebAppState>) -> Router {
-    Router::new()
+    let router = Router::new()
         // 账户管理 API
         .route(
             "/api/accounts",
@@ -49,11 +49,15 @@ pub fn build_routes(state: Arc<WebAppState>) -> Router {
         // 导入 API
         .route("/api/import/json", post(handlers::import_accounts_json))
         .route("/api/import/file", post(handlers::import_accounts_file))
-        .route("/api/import/database", post(handlers::import_from_database))
         // 日志 API
         .route("/api/proxy/logs", get(handlers::get_proxy_logs))
         .route("/api/proxy/logs/clear", post(handlers::clear_proxy_logs))
         // 健康检查
-        .route("/healthz", get(handlers::health_check))
-        .with_state(state)
+        .route("/healthz", get(handlers::health_check));
+
+    // 数据库导入仅在 web-server 模式可用
+    #[cfg(feature = "web-server")]
+    let router = router.route("/api/import/database", post(handlers::import_from_database));
+
+    router.with_state(state)
 }
