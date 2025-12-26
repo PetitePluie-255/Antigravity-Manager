@@ -7,7 +7,7 @@ COPY . .
 RUN pnpm run build
 
 # Stage 2: Build Rust Backend
-FROM rust:1.75-slim AS backend-builder
+FROM rust:1.83-slim AS backend-builder
 WORKDIR /app
 
 # Install build dependencies
