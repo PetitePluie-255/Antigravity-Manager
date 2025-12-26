@@ -2,12 +2,11 @@
 node_modules/
 server/node_modules/
 
-# Build outputs
+# Build outputs (will be rebuilt in Docker)
 dist/
 server/dist/
 
 # Development files
-src-tauri/
 *.md
 !README.md
 .git/
@@ -15,6 +14,10 @@ src-tauri/
 .vscode/
 docs/
 
+# Rust build artifacts (will be rebuilt)
+src-tauri/target/
+
 # Misc
 *.log
 .DS_Store
+
