@@ -1,80 +1,95 @@
-// Gemini → OpenAI 响应转换
 use super::models::*;
 use serde_json::Value;
+// use chrono::Utc;
+// use uuid::Uuid;
 
 pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
     // 解包 response 字段
     let raw = gemini_response.get("response").unwrap_or(gemini_response);
 
-    // 提取文本
-    let text_part = raw
-        .get("candidates")
+    // 提取 content 和 tool_calls
+    let mut content_out = String::new();
+    let mut tool_calls = Vec::new();
+    
+    if let Some(parts) = raw.get("candidates")
         .and_then(|c| c.get(0))
         .and_then(|cand| cand.get("content"))
         .and_then(|content| content.get("parts"))
-        .and_then(|parts| parts.get(0))
-        .and_then(|part| part.get("text"))
-        .and_then(|t| t.as_str())
-        .unwrap_or("");
+        .and_then(|p| p.as_array()) {
+            
+        for part in parts {
+            // 思维链/推理部分 (Gemini 2.0+)
+            if let Some(thought) = part.get("thought").and_then(|t| t.as_str()) {
+                if !thought.is_empty() {
+                    content_out.push_str("<thought>\n");
+                    content_out.push_str(thought);
+                    content_out.push_str("\n</thought>\n\n");
+                }
+            }
 
-    // 提取图片 (inlineData)
-    let image_part = raw
-        .get("candidates")
-        .and_then(|c| c.get(0))
-        .and_then(|cand| cand.get("content"))
-        .and_then(|content| content.get("parts"))
-        .and_then(|parts| parts.get(0))
-        .and_then(|part| part.get("inlineData"));
-
-    let text = if let Some(img) = image_part {
-        let mime_type = img.get("mimeType").and_then(|v| v.as_str()).unwrap_or("image/png");
-        let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
-        if !data.is_empty() {
-            format!("![image](data:{};base64,{})", mime_type, data)
-        } else {
-            text_part.to_string()
+            // 文本部分
+            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                content_out.push_str(text);
+            }
+            
+            // 工具调用部分
+            if let Some(fc) = part.get("functionCall") {
+                let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                let id = fc.get("id").and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{}-{}", name, uuid::Uuid::new_v4()));
+                
+                tool_calls.push(ToolCall {
+                    id,
+                    r#type: "function".to_string(),
+                    function: ToolFunction {
+                        name: name.to_string(),
+                        arguments: args,
+                    },
+                });
+            }
+            
+            // 图片处理 (保持现有逻辑)
+            if let Some(img) = part.get("inlineData") {
+                let mime_type = img.get("mimeType").and_then(|v| v.as_str()).unwrap_or("image/png");
+                let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                if !data.is_empty() {
+                    content_out.push_str(&format!("![image](data:{};base64,{})", mime_type, data));
+                }
+            }
         }
-    } else {
-        text_part.to_string()
-    };
+    }
 
-    // 提取 finish_reason
+    // 提取 finish_reason (增加更多映射)
     let finish_reason = raw
         .get("candidates")
         .and_then(|c| c.get(0))
         .and_then(|cand| cand.get("finishReason"))
         .and_then(|f| f.as_str())
-        .map(|f| {
-            if f == "STOP" {
-                "stop"
-            } else if f == "MAX_TOKENS" {
-                "length"
-            } else {
-                "stop"
-            }
+        .map(|f| match f {
+            "STOP" => "stop",
+            "MAX_TOKENS" => "length",
+            "SAFETY" => "content_filter",
+            "RECITATION" => "content_filter",
+            _ => "stop",
         })
         .unwrap_or("stop");
 
     OpenAIResponse {
-        id: raw
-            .get("responseId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("resp_unknown")
-            .to_string(),
+        id: raw.get("responseId").and_then(|v| v.as_str()).unwrap_or("resp_unknown").to_string(),
         object: "chat.completion".to_string(),
         created: chrono::Utc::now().timestamp() as u64,
-        model: raw
-            .get("modelVersion")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string(),
+        model: raw.get("modelVersion").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
         choices: vec![Choice {
             index: 0,
             message: OpenAIMessage {
                 role: "assistant".to_string(),
-                content: text.to_string(),
+                content: if content_out.is_empty() { None } else { Some(content_out) },
+                tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                tool_call_id: None,
             },
-            finish_reason: finish_reason.to_string(),
+            finish_reason: Some(finish_reason.to_string()),
         }],
     }
 }
@@ -99,7 +114,7 @@ mod tests {
 
         let result = transform_openai_response(&gemini_resp);
         assert_eq!(result.object, "chat.completion");
-        assert_eq!(result.choices[0].message.content, "Hello!");
-        assert_eq!(result.choices[0].finish_reason, "stop");
+        assert_eq!(result.choices[0].message.content, Some("Hello!".to_string()));
+        assert_eq!(result.choices[0].finish_reason, Some("stop".to_string()));
     }
 }

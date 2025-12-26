@@ -139,6 +139,21 @@ export async function startOAuthLogin(): Promise<Account> {
   });
 }
 
+export async function completeOAuthLogin(): Promise<Account> {
+    ensureTauriEnvironment();
+    try {
+        return await invoke('complete_oauth_login');
+    } catch (error) {
+        if (typeof error === 'string') {
+            if (error.includes('Refresh Token') || error.includes('refresh_token')) {
+                throw error;
+            }
+            throw `OAuth 授权失败: ${error}`;
+        }
+        throw error;
+    }
+}
+
 export async function cancelOAuthLogin(): Promise<void> {
   if (isTauri()) {
     return await apiCall("cancel_oauth_login");
@@ -168,6 +183,10 @@ export async function importFromDb(): Promise<Account> {
     throw new Error("从 IDE 数据库导入仅在桌面应用中可用。");
   }
   return await apiCall("import_from_db");
+}
+
+export async function importFromCustomDb(path: string): Promise<Account> {
+    return await invoke('import_custom_db', { path });
 }
 
 export async function syncAccountFromDb(): Promise<Account | null> {

@@ -206,16 +206,14 @@ function AccountCard({ account, selected, onSelect, isCurrent, isRefreshing, isS
                     >
                         <Info className="w-3.5 h-3.5" />
                     </button>
-                    {!isCurrent && (
-                        <button
-                            className={`p-1.5 rounded-lg transition-all ${isSwitching ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/10 cursor-not-allowed' : 'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
-                            onClick={(e) => { e.stopPropagation(); onSwitch(); }}
-                            title={isSwitching ? t('common.loading') : t('common.switch')}
-                            disabled={isSwitching}
-                        >
-                            <ArrowRightLeft className={`w-3.5 h-3.5 ${isSwitching ? 'animate-spin' : ''}`} />
-                        </button>
-                    )}
+                    <button
+                        className={`p-1.5 rounded-lg transition-all ${isSwitching ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/10 cursor-not-allowed' : 'text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`}
+                        onClick={(e) => { e.stopPropagation(); onSwitch(); }}
+                        title={isSwitching ? t('common.loading') : t('common.switch')}
+                        disabled={isSwitching}
+                    >
+                        <ArrowRightLeft className={`w-3.5 h-3.5 ${isSwitching ? 'animate-spin' : ''}`} />
+                    </button>
                     <button
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing
                             ? 'text-green-600 bg-green-50'

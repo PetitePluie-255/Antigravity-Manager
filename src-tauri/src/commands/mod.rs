@@ -282,6 +282,67 @@ pub async fn start_oauth_login(app_handle: tauri::AppHandle) -> Result<Account, 
     Ok(account)
 }
 
+/// 完成 OAuth 授权（不自动打开浏览器）
+#[tauri::command]
+pub async fn complete_oauth_login(app_handle: tauri::AppHandle) -> Result<Account, String> {
+    modules::logger::log_info("完成 OAuth 授权流程 (manual)...");
+
+    // 1. 等待回调并交换 Token（不 open browser）
+    let token_res = modules::oauth_server::complete_oauth_flow(app_handle.clone()).await?;
+
+    // 2. 检查 refresh_token
+    let refresh_token = token_res.refresh_token.ok_or_else(|| {
+        "未获取到 Refresh Token。\n\n\
+         可能原因:\n\
+         1. 您之前已授权过此应用,Google 不会再次返回 refresh_token\n\n\
+         解决方案:\n\
+         1. 访问 https://myaccount.google.com/permissions\n\
+         2. 撤销 'Antigravity Tools' 的访问权限\n\
+         3. 重新进行 OAuth 授权\n\n\
+         或者使用 'Refresh Token' 标签页手动添加账号".to_string()
+    })?;
+
+    // 3. 获取用户信息
+    let user_info = modules::oauth::get_user_info(&token_res.access_token).await?;
+    modules::logger::log_info(&format!("获取用户信息成功: {}", user_info.email));
+
+    // 4. 尝试获取项目ID
+    let project_id = crate::proxy::project_resolver::fetch_project_id(&token_res.access_token)
+        .await
+        .ok();
+
+    if let Some(ref pid) = project_id {
+        modules::logger::log_info(&format!("获取项目ID成功: {}", pid));
+    } else {
+        modules::logger::log_warn("未能获取项目ID,将在后续懒加载");
+    }
+
+    // 5. 构造 TokenData
+    let token_data = TokenData::new(
+        token_res.access_token,
+        refresh_token,
+        token_res.expires_in,
+        Some(user_info.email.clone()),
+        project_id,
+        None,
+    );
+
+    // 6. 添加或更新到账号列表
+    modules::logger::log_info("正在保存账号信息...");
+    let mut account = modules::upsert_account(user_info.email.clone(), user_info.get_display_name(), token_data)?;
+
+    // 7. 自动触发刷新额度
+    let _ = internal_refresh_account_quota(&app_handle, &mut account).await;
+
+    Ok(account)
+}
+
+/// 预生成 OAuth 授权链接 (不打开浏览器)
+#[tauri::command]
+pub async fn prepare_oauth_url(app_handle: tauri::AppHandle) -> Result<String, String> {
+    crate::modules::oauth_server::prepare_oauth_url(app_handle).await
+}
+
 #[tauri::command]
 pub async fn cancel_oauth_login() -> Result<(), String> {
     modules::oauth_server::cancel_oauth_flow();
@@ -308,6 +369,25 @@ pub async fn import_from_db(app: tauri::AppHandle) -> Result<Account, String> {
     let mut account = modules::migration::import_from_db().await?;
 
     // 既然是从数据库导入（即 IDE 当前账号），自动将其设为 Manager 的当前账号
+    let account_id = account.id.clone();
+    modules::account::set_current_account_id(&account_id)?;
+    
+    // 自动触发刷新额度
+    let _ = internal_refresh_account_quota(&app, &mut account).await;
+    
+    // 刷新托盘图标展示
+    crate::modules::tray::update_tray_menus(&app);
+
+    Ok(account)
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub async fn import_custom_db(app: tauri::AppHandle, path: String) -> Result<Account, String> {
+    // 调用重构后的自定义导入函数
+    let mut account = modules::migration::import_from_custom_db_path(path).await?;
+
+    // 自动设为当前账号
     let account_id = account.id.clone();
     modules::account::set_current_account_id(&account_id)?;
     
@@ -410,8 +490,20 @@ pub async fn show_main_window(window: tauri::Window) -> Result<(), String> {
 
 /// 获取 Antigravity 可执行文件路径
 #[tauri::command]
-pub async fn get_antigravity_path() -> Result<String, String> {
-    match modules::process::get_antigravity_executable_path() {
+pub async fn get_antigravity_path(bypass_config: Option<bool>) -> Result<String, String> {
+    // 1. 优先从配置查询 (除非明确要求绕过)
+    if bypass_config != Some(true) {
+        if let Ok(config) = crate::modules::config::load_app_config() {
+            if let Some(path) = config.antigravity_executable {
+                if std::path::Path::new(&path).exists() {
+                    return Ok(path);
+                }
+            }
+        }
+    }
+
+    // 2. 执行实时探测
+    match crate::modules::process::get_antigravity_executable_path() {
         Some(path) => Ok(path.to_string_lossy().to_string()),
         None => Err("未找到 Antigravity 安装路径".to_string())
     }

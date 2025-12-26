@@ -23,5 +23,6 @@ export interface AppConfig {
     auto_sync: boolean;
     sync_interval: number;
     default_export_path?: string;
+    antigravity_executable?: string; // [NEW] 手动指定的反重力程序路径
     proxy: ProxyConfig;
 }

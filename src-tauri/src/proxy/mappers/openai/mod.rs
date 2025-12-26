@@ -9,4 +9,4 @@ pub mod streaming;
 pub use models::*;
 pub use request::*;
 pub use response::*;
-pub use streaming::*;
+// No public exports needed here if unused

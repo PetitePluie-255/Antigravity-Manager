@@ -99,7 +99,14 @@ pub enum ContentBlock {
     #[serde(rename = "tool_result")]
     ToolResult {
         tool_use_id: String,
-        content: String,
+        content: serde_json::Value, // Changed from String to Value to support Array of Blocks
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_error: Option<bool>,
+    },
+
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking {
+        data: String,
     },
 }
 

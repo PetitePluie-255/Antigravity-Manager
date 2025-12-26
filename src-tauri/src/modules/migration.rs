@@ -189,14 +189,18 @@ pub async fn import_from_v1() -> Result<Vec<Account>, String> {
     Ok(imported_accounts)
 }
 
-/// 从数据库导入当前登录账号
-pub async fn import_from_db() -> Result<Account, String> {
+/// 从自定义数据库路径导入账号
+pub async fn import_from_custom_db_path(path_str: String) -> Result<Account, String> {
     use crate::modules::oauth;
 
-    let refresh_token = get_refresh_token_from_db()?;
+    let path = PathBuf::from(path_str);
+    if !path.exists() {
+        return Err(format!("文件不存在: {:?}", path));
+    }
+
+    let refresh_token = extract_refresh_token_from_file(&path)?;
         
     // 3. 使用 Refresh Token 获取最新的 Access Token 和用户信息
-    // 这一步至关重要，因为 DB 中的 Access Token 可能已过期，且我们需要 Email
     crate::modules::logger::log_info("正在使用 Refresh Token 获取用户信息...");
     let token_resp = oauth::refresh_access_token(&refresh_token).await?;
     let user_info = oauth::get_user_info(&token_resp.access_token).await?;
@@ -218,16 +222,20 @@ pub async fn import_from_db() -> Result<Account, String> {
     account::upsert_account(email.clone(), user_info.name, token_data)
 }
 
-/// 从数据库获取当前 Refresh Token (不执行网络请求)
-pub fn get_refresh_token_from_db() -> Result<String, String> {
+/// 从默认 IDE 数据库导入当前登录账号
+pub async fn import_from_db() -> Result<Account, String> {
     let db_path = db::get_db_path()?;
-    
+    import_from_custom_db_path(db_path.to_string_lossy().to_string()).await
+}
+
+/// 从数据库获取当前 Refresh Token (通用逻辑)
+pub fn extract_refresh_token_from_file(db_path: &PathBuf) -> Result<String, String> {
     if !db_path.exists() {
         return Err(format!("找不到数据库文件: {:?}", db_path));
     }
     
     // 连接数据库
-    let conn = rusqlite::Connection::open(&db_path)
+    let conn = rusqlite::Connection::open(db_path)
         .map_err(|e| format!("打开数据库失败: {}", e))?;
         
     // 从 ItemTable 读取
@@ -237,7 +245,7 @@ pub fn get_refresh_token_from_db() -> Result<String, String> {
             ["jetskiStateSync.agentManagerInitState"],
             |row| row.get(0),
         )
-        .map_err(|_| "未找到登录状态数据".to_string())?;
+        .map_err(|_| "未找到登录状态数据 (jetskiStateSync.agentManagerInitState)".to_string())?;
         
     // Base64 解码
     let blob = general_purpose::STANDARD
@@ -247,13 +255,19 @@ pub fn get_refresh_token_from_db() -> Result<String, String> {
     // 1. 查找 oauthTokenInfo (Field 6)
     let oauth_data = protobuf::find_field(&blob, 6)
         .map_err(|e| format!("解析 Protobuf 失败: {}", e))?
-        .ok_or("未找到 OAuth 数据")?;
+        .ok_or("未找到 OAuth 数据 (Field 6)")?;
         
     // 2. 提取 refresh_token (Field 3)
     let refresh_bytes = protobuf::find_field(&oauth_data, 3)
         .map_err(|e| format!("解析 OAuth 数据失败: {}", e))?
-        .ok_or("数据中未包含 Refresh Token")?;
+        .ok_or("数据中未包含 Refresh Token (Field 3)")?;
         
     String::from_utf8(refresh_bytes)
         .map_err(|_| "Refresh Token 非 UTF-8 编码".to_string())
+}
+
+/// 从默认数据库获取当前 Refresh Token (兼容旧调用)
+pub fn get_refresh_token_from_db() -> Result<String, String> {
+    let db_path = db::get_db_path()?;
+    extract_refresh_token_from_file(&db_path)
 }

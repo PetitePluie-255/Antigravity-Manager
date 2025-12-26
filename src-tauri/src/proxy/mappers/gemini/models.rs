@@ -1,6 +1,7 @@
 // Gemini v1internal 数据模型
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct V1InternalRequest {
     pub project: String,

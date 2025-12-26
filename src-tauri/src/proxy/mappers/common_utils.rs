@@ -39,13 +39,12 @@ pub fn resolve_request_config(original_model: &str, mapped_model: &str) -> Reque
         };
     }
 
-    // Strip -online suffix from original model if present
+    // Strip -online suffix from original model if present (to detect networking intent)
     let is_online_suffix = original_model.ends_with("-online");
-    let final_model = if is_online_suffix {
-        original_model.trim_end_matches("-online").to_string()
-    } else {
-        original_model.to_string()
-    };
+    
+    // The final model to send upstream should be the MAPPED model, 
+    // but we strip any legacy suffixes if they leaked into the mapping
+    let final_model = mapped_model.trim_end_matches("-online").to_string();
 
     // High-quality grounding allowlist
     let is_high_quality_model = mapped_model == "gemini-2.5-flash"
@@ -98,6 +97,15 @@ pub fn inject_google_search_tool(body: &mut Value) {
     if let Some(obj) = body.as_object_mut() {
         let tools_entry = obj.entry("tools").or_insert_with(|| json!([]));
         if let Some(tools_arr) = tools_entry.as_array_mut() {
+            // [Conflict Fix] Protocol mutual exclusion check
+            // Gemini dictates: Mixing "googleSearch" with "functionDeclarations" is NOT allowed.
+            let has_function_decls = tools_arr.iter().any(|t| t.get("functionDeclarations").is_some());
+            if has_function_decls {
+                // If the user (e.g., Claude Code) has already defined terminal tools,
+                // we MUST NOT inject googleSearch to avoid 400 errors.
+                return;
+            }
+
             let has_search = tools_arr.iter().any(|t| t.get("googleSearch").is_some());
             if !has_search {
                 tools_arr.push(json!({"googleSearch": {}}));

@@ -99,7 +99,11 @@
                 "desc": "Opens default browser for Google login to auto-fetch and save Token.",
                 "btn_start": "Start OAuth",
                 "btn_waiting": "Waiting for auth...",
-                "copy_link": "Copy Auth Link"
+                "btn_finish": "I already authorized",
+                "copy_link": "Copy Auth Link",
+                "copied": "Copied",
+                "link_label": "Authorization URL",
+                "link_click_to_copy": "Click to copy"
             },
             "token": {
                 "label": "Refresh Token",
@@ -118,7 +122,8 @@
                 "or": "OR",
                 "scheme_b": "Plan B: From V1 Backup",
                 "scheme_b_desc": "Scan ~/.antigravity-agent for V1 account data.",
-                "btn_v1": "Batch Import V1"
+                "btn_v1": "Batch Import V1",
+                "btn_custom_db": "Import Custom DB"
             },
             "btn_cancel": "Cancel",
             "btn_confirm": "Confirm",
@@ -187,6 +192,12 @@
             "open_btn": "Open",
             "data_dir": "Data Directory",
             "data_dir_desc": "Account data and config file location",
+            "antigravity_path": "Antigravity Path",
+            "antigravity_path_placeholder": "Not set (Will use auto-detection)",
+            "antigravity_path_desc": "If you installed Antigravity in a non-standard location, you can manually specify the executable path here (Points to .app on MacOS).",
+            "antigravity_path_select": "Select Antigravity Executable",
+            "antigravity_path_detected": "Detected path updated",
+            "detect_btn": "Detect",
             "logs_title": "Logs Maintenance",
             "logs_desc": "Clear log cache files. Does not affect account data.",
             "clear_logs": "Clear Logs Cache",

@@ -78,7 +78,7 @@ pub fn resolve_model_route(
 ) -> String {
     // 1. 检查自定义精确映射 (优先级最高)
     if let Some(target) = custom_mapping.get(original_model) {
-        tracing::info!("[Router] 使用自定义精确映射: {} -> {}", original_model, target);
+        crate::modules::logger::log_info(&format!("[Router] 使用自定义精确映射: {} -> {}", original_model, target));
         return target.clone();
     }
 
@@ -89,15 +89,15 @@ pub fn resolve_model_route(
     if (lower_model.starts_with("gpt-4") && !lower_model.contains("o") && !lower_model.contains("mini") && !lower_model.contains("turbo")) || 
        lower_model.starts_with("o1-") || lower_model.starts_with("o3-") || lower_model == "gpt-4" {
         if let Some(target) = openai_mapping.get("gpt-4-series") {
-            tracing::info!("[Router] 使用 GPT-4 系列映射: {} -> {}", original_model, target);
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
     }
     
     // GPT-4o / 3.5 系列 (均衡与轻量, 含 4o, mini, turbo)
-    if lower_model.contains("4o") || lower_model.starts_with("gpt-3.5") || lower_model.contains("mini") || lower_model.contains("turbo") {
+    if lower_model.contains("4o") || lower_model.starts_with("gpt-3.5") || (lower_model.contains("mini") && !lower_model.contains("gemini")) || lower_model.contains("turbo") {
         if let Some(target) = openai_mapping.get("gpt-4o-series") {
-            tracing::info!("[Router] 使用 GPT-4o/3.5 系列映射: {} -> {}", original_model, target);
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4o/3.5 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
     }
@@ -113,7 +113,7 @@ pub fn resolve_model_route(
         };
 
         if let Some(target) = anthropic_mapping.get(family_key) {
-            tracing::warn!("[Router] 使用 Anthropic 系列映射: {} -> {}", original_model, target);
+            crate::modules::logger::log_warn(&format!("[Router] 使用 Anthropic 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
         
@@ -140,6 +140,11 @@ mod tests {
         assert_eq!(
             map_claude_model_to_gemini("claude-opus-4"),
             "claude-opus-4-5-thinking"
+        );
+        // Test gemini pass-through (should not be caught by "mini" rule)
+        assert_eq!(
+            map_claude_model_to_gemini("gemini-2.5-flash-mini-test"),
+            "gemini-2.5-flash-mini-test"
         );
         assert_eq!(
             map_claude_model_to_gemini("unknown-model"),

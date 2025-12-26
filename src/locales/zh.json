@@ -100,7 +100,11 @@
                 "desc": "将打开默认浏览器进行 Google 登录授权，自动获取并保存 Token。",
                 "btn_start": "开始 OAuth 授权",
                 "btn_waiting": "正在等待授权...",
-                "copy_link": "复制授权链接"
+                "btn_finish": "我已授权，继续",
+                "copy_link": "复制授权链接",
+                "copied": "已复制",
+                "link_label": "授权链接",
+                "link_click_to_copy": "点击复制"
             },
             "token": {
                 "label": "Refresh Token",
@@ -119,7 +123,8 @@
                 "or": "或者",
                 "scheme_b": "方案 B: 从 V1 版本备份",
                 "scheme_b_desc": "扫描 ~/.antigravity-agent 目录，批量导入旧版本的账号数据。",
-                "btn_v1": "从 V1 备份批量导入"
+                "btn_v1": "从 V1 备份批量导入",
+                "btn_custom_db": "从自定义 DB 导入"
             },
             "btn_cancel": "取消",
             "btn_confirm": "确认添加",
@@ -188,6 +193,12 @@
             "open_btn": "打开",
             "data_dir": "数据目录",
             "data_dir_desc": "账号数据和配置文件的存储位置",
+            "antigravity_path": "反重力程序路径",
+            "antigravity_path_placeholder": "未设置 (将使用自动探测)",
+            "antigravity_path_desc": "如果您将 Antigravity 应用安装在非标准位置，可在此手动指定可执行文件路径（MacOS 指向 .app 目录）。",
+            "antigravity_path_select": "选择反重力程序可执行文件",
+            "antigravity_path_detected": "已更新探测到的路径",
+            "detect_btn": "探测",
             "logs_title": "日志维护",
             "logs_desc": "清理应用产生的日志缓存文件，不会影响账号数据。",
             "clear_logs": "清理日志缓存",

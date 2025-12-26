@@ -3,54 +3,116 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+/// 获取当前正在运行的可执行文件规范化路径
+fn get_current_exe_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+}
+
 /// 检查 Antigravity 是否在运行
 pub fn is_antigravity_running() -> bool {
     let mut system = System::new();
-    // 关键修复：必须刷新进程列表，否则获取的是空列表
     system.refresh_processes(sysinfo::ProcessesToUpdate::All);
 
+    let current_exe = get_current_exe_path();
     let current_pid = std::process::id();
 
+    // 识别参考 1: 加载手动配置路径（移至循环外以提升性能）
+    let manual_path = crate::modules::config::load_app_config()
+        .ok()
+        .and_then(|c| c.antigravity_executable)
+        .and_then(|p| std::path::PathBuf::from(p).canonicalize().ok());
+
     for (pid, process) in system.processes() {
-        if pid.as_u32() == current_pid {
+        let pid_u32 = pid.as_u32();
+        if pid_u32 == current_pid {
             continue;
         }
 
-        #[allow(unused_variables)]
         let name = process.name().to_string_lossy().to_lowercase();
         let exe_path = process.exe()
             .and_then(|p| p.to_str())
             .unwrap_or("")
             .to_lowercase();
 
+        // 排除自身路径（处理 Linux 下管理器被误认为反重力进程的情况）
+        if let (Some(ref my_path), Some(p_exe)) = (&current_exe, process.exe()) {
+            if let Ok(p_path) = p_exe.canonicalize() {
+                if my_path == &p_path {
+                    continue;
+                }
+            }
+        }
+
+        // 识别参考 2: 优先检查是否匹配手动指定的路径
+        if let (Some(ref m_path), Some(p_exe)) = (&manual_path, process.exe()) {
+            if let Ok(p_path) = p_exe.canonicalize() {
+                // macOS 下检查是否都在同一个 .app 包内
+                #[cfg(target_os = "macos")]
+                {
+                    let m_path_str = m_path.to_string_lossy();
+                    let p_path_str = p_path.to_string_lossy();
+                    if let (Some(m_idx), Some(p_idx)) = (m_path_str.find(".app"), p_path_str.find(".app")) {
+                        if m_path_str[..m_idx+4] == p_path_str[..p_idx+4] {
+                            // 即使路径匹配，也必须通过名称和参数确认不是 Helper
+                            let args = process.cmd();
+                            let is_helper_by_args = args.iter().any(|arg| arg.to_string_lossy().contains("--type="));
+                            let is_helper_by_name = name.contains("helper") || name.contains("plugin") || name.contains("renderer") || name.contains("gpu") || name.contains("crashpad") || name.contains("utility") || name.contains("audio") || name.contains("sandbox");
+                            if !is_helper_by_args && !is_helper_by_name { return true; }
+                        }
+                    }
+                }
+                
+                #[cfg(not(target_os = "macos"))]
+                if m_path == &p_path {
+                    return true;
+                }
+            }
+        }
+
+        // 通用的辅助进程排除逻辑
+
+        // 通用的辅助进程排除逻辑
+        let args = process.cmd();
+        let args_str = args.iter()
+            .map(|arg| arg.to_string_lossy().to_lowercase())
+            .collect::<Vec<String>>()
+            .join(" ");
+        
+        let is_helper = args_str.contains("--type=") || 
+                       name.contains("helper") || 
+                       name.contains("plugin") || 
+                       name.contains("renderer") || 
+                       name.contains("gpu") ||
+                       name.contains("crashpad") ||
+                       name.contains("utility") ||
+                       name.contains("audio") ||
+                       name.contains("sandbox") ||
+                       exe_path.contains("crashpad");
+
         #[cfg(target_os = "macos")]
         {
-            if exe_path.contains("antigravity.app") {
+            if exe_path.contains("antigravity.app") && !is_helper {
                 return true;
             }
         }
 
         #[cfg(target_os = "windows")]
         {
-            // 严格匹配进程名，避免 false positive (如 esbuild.exe 在 antigravity 目录下)
-            if name == "antigravity.exe" {
-                 crate::modules::logger::log_info(&format!("检测到 Antigravity 进程: {} (PID: {}) Path: {}", name, pid, exe_path));
+            if name == "antigravity.exe" && !is_helper {
                  return true;
             }
         }
 
         #[cfg(target_os = "linux")]
         {
-            // 匹配进程名或可执行文件名 (忽略大小写)
-            if name.contains("antigravity") {
+            if (name.contains("antigravity") || exe_path.contains("/antigravity")) && 
+               !name.contains("tools") && !is_helper {
                 return true;
-            }
-            if let Some(exe) = process.exe() {
-                if let Some(file_name) = exe.file_name() {
-                    if file_name.to_string_lossy().to_lowercase() == "antigravity" {
-                        return true;
-                    }
-                }
             }
         }
     }
@@ -58,56 +120,192 @@ pub fn is_antigravity_running() -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
+/// 获取当前进程及其所有直系亲属（祖先 + 后代）的 PID 集合
+fn get_self_family_pids(system: &sysinfo::System) -> std::collections::HashSet<u32> {
+    let current_pid = std::process::id();
+    let mut family_pids = std::collections::HashSet::new();
+    family_pids.insert(current_pid);
+
+    // 1. 向上查找所有祖先 (Ancestors) - 防止杀掉启动器
+    let mut next_pid = current_pid;
+    // 防止死循环，设置最大深度 10
+    for _ in 0..10 {
+         let pid_val = sysinfo::Pid::from_u32(next_pid);
+         if let Some(process) = system.process(pid_val) {
+             if let Some(parent) = process.parent() {
+                 let parent_id = parent.as_u32();
+                 // 避免循环或重复
+                 if !family_pids.insert(parent_id) {
+                     break;
+                 }
+                 next_pid = parent_id;
+             } else {
+                 break;
+             }
+         } else {
+             break;
+         }
+    }
+
+    // 2. 向下查找所有后代 (Descendants)
+    // 构建父子关系映射 (Parent -> Children)
+    let mut adj: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for (pid, process) in system.processes() {
+        if let Some(parent) = process.parent() {
+            adj.entry(parent.as_u32()).or_default().push(pid.as_u32());
+        }
+    }
+
+    // BFS 遍历查找所有后代
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(current_pid);
+
+    while let Some(pid) = queue.pop_front() {
+        if let Some(children) = adj.get(&pid) {
+            for &child in children {
+                if family_pids.insert(child) {
+                    queue.push_back(child);
+                }
+            }
+        }
+    }
+    
+    family_pids
+}
+
 /// 获取所有 Antigravity 进程的 PID（包括主进程和Helper进程）
 fn get_antigravity_pids() -> Vec<u32> {
     let mut system = System::new();
     system.refresh_processes(sysinfo::ProcessesToUpdate::All);
     
-    let current_pid = std::process::id();
+    // Linux 端启用家族进程树排除
+    #[cfg(target_os = "linux")]
+    let family_pids = get_self_family_pids(&system);
+
     let mut pids = Vec::new();
-    
+    let current_pid = std::process::id();
+    let current_exe = get_current_exe_path();
+
+    // 加载手动配置路径作为辅助参考
+    let manual_path = crate::modules::config::load_app_config()
+        .ok()
+        .and_then(|c| c.antigravity_executable)
+        .and_then(|p| std::path::PathBuf::from(p).canonicalize().ok());
+
     for (pid, process) in system.processes() {
-        // 排除当前进程
-        if pid.as_u32() == current_pid {
+        let pid_u32 = pid.as_u32();
+        
+        // 排除自身 PID
+        if pid_u32 == current_pid {
             continue;
         }
+
+        // 排除自身可执行文件路径（深度加固，防止名称识别过于宽泛）
+        if let (Some(ref my_path), Some(p_exe)) = (&current_exe, process.exe()) {
+            if let Ok(p_path) = p_exe.canonicalize() {
+                if my_path == &p_path {
+                    continue;
+                }
+            }
+        }
+
+        let _name = process.name().to_string_lossy().to_lowercase();
         
+        #[cfg(target_os = "linux")]
+        {
+            // 1. 排除家族进程 (自身、子进程、父进程)
+            if family_pids.contains(&pid_u32) {
+                continue;
+            }
+            // 2. 额外保护：如果名字包含 "tools" 且不是子进程，很有可能是管理器本身
+            if _name.contains("tools") {
+                continue;
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            // 其他平台仅排除自身
+            if pid_u32 == current_pid {
+                continue;
+            }
+        }
+        
+        // 识别参考 3: 检查手动配置路径匹配
+        if let (Some(ref m_path), Some(p_exe)) = (&manual_path, process.exe()) {
+            if let Ok(p_path) = p_exe.canonicalize() {
+                #[cfg(target_os = "macos")]
+                {
+                    let m_path_str = m_path.to_string_lossy();
+                    let p_path_str = p_path.to_string_lossy();
+                    if let (Some(m_idx), Some(p_idx)) = (m_path_str.find(".app"), p_path_str.find(".app")) {
+                        if m_path_str[..m_idx+4] == p_path_str[..p_idx+4] {
+                            let args = process.cmd();
+                            let is_helper_by_args = args.iter().any(|arg| arg.to_string_lossy().contains("--type="));
+                            let is_helper_by_name = _name.contains("helper") || _name.contains("plugin") || _name.contains("renderer") || _name.contains("gpu") || _name.contains("crashpad") || _name.contains("utility") || _name.contains("audio") || _name.contains("sandbox");
+                            if !is_helper_by_args && !is_helper_by_name { 
+                                pids.push(pid_u32); 
+                                continue; 
+                            }
+                        }
+                    }
+                }
+                
+                #[cfg(not(target_os = "macos"))]
+                if m_path == &p_path {
+                    pids.push(pid_u32);
+                    continue;
+                }
+            }
+        }
+
+        // 获取可执行文件路径
         let exe_path = process.exe()
             .and_then(|p| p.to_str())
             .unwrap_or("")
             .to_lowercase();
         
+        // 通用的辅助进程排除逻辑
+        let args = process.cmd();
+        let args_str = args.iter()
+            .map(|arg| arg.to_string_lossy().to_lowercase())
+            .collect::<Vec<String>>()
+            .join(" ");
+        
+        let is_helper = args_str.contains("--type=") || 
+                       _name.contains("helper") || 
+                       _name.contains("plugin") || 
+                       _name.contains("renderer") || 
+                       _name.contains("gpu") ||
+                       _name.contains("crashpad") ||
+                       _name.contains("utility") ||
+                       _name.contains("audio") ||
+                       _name.contains("sandbox") ||
+                       exe_path.contains("crashpad");
+
         #[cfg(target_os = "macos")]
         {
-            // 匹配所有 Antigravity 相关进程（主进程 + Helper 进程）
-            if exe_path.contains("antigravity.app") {
-                pids.push(pid.as_u32());
+            // 匹配 Antigravity 主程序包内的进程，但排除 Helper/Plugin/Renderer 等辅助进程
+            if exe_path.contains("antigravity.app") && !is_helper {
+                pids.push(pid_u32);
             }
         }
         
         #[cfg(target_os = "windows")]
         {
             let name = process.name().to_string_lossy().to_lowercase();
-            if name.starts_with("antigravity") && name.ends_with(".exe") {
-                pids.push(pid.as_u32());
+            if name == "antigravity.exe" && !is_helper {
+                pids.push(pid_u32);
             }
         }
         
         #[cfg(target_os = "linux")]
         {
             let name = process.name().to_string_lossy().to_lowercase();
-            let is_match = if name.contains("antigravity") {
-                true
-            } else if let Some(exe) = process.exe() {
-                exe.file_name()
-                    .map(|f| f.to_string_lossy().to_lowercase() == "antigravity")
-                    .unwrap_or(false)
-            } else {
-                false
-            };
-
-            if is_match {
-                pids.push(pid.as_u32());
+            if (name == "antigravity" || exe_path.contains("/antigravity")) && 
+               !name.contains("tools") && !is_helper {
+                pids.push(pid_u32);
             }
         }
     }
@@ -125,15 +323,19 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Windows: 直接执行静默强杀 (Quiet Force Kill)
-        // 模拟 cursor-free-vip 的逻辑：不尝试优雅关闭，直接使用 /F /IM 原子性强杀
-        // 这被证明是处理 Antigravity 及其子进程最快且最干净的方式，避免了死锁和弹窗
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", "Antigravity.exe"])
-            .output();
-            
-        // 给一点点时间让系统清理 PID
-        thread::sleep(Duration::from_millis(200));
+        // Windows: 改为使用 PID 进行精准关闭，以支持并存多版本或自定义文件名
+        let pids = get_antigravity_pids();
+        if !pids.is_empty() {
+            crate::modules::logger::log_info(&format!("正在 Windows 上精准关闭 {} 个识别到的进程...", pids.len()));
+            for pid in pids {
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                    .output();
+            }
+            // 给一点点时间让系统清理 PID
+            thread::sleep(Duration::from_millis(200));
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -149,6 +351,12 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
             system.refresh_processes(sysinfo::ProcessesToUpdate::All);
             
             let mut main_pid = None;
+
+            // 加载手动配置路径作为最高优先级参考
+            let manual_path = crate::modules::config::load_app_config()
+                .ok()
+                .and_then(|c| c.antigravity_executable)
+                .and_then(|p| std::path::PathBuf::from(p).canonicalize().ok());
             
             crate::modules::logger::log_info("正在分析进程列表以识别主进程:");
             for pid_u32 in &pids {
@@ -156,7 +364,6 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                 if let Some(process) = system.process(pid) {
                     let name = process.name().to_string_lossy();
                     let args = process.cmd();
-                    // sysinfo 0.31 returns &[OsString], so we need to convert to String
                     let args_str = args.iter()
                         .map(|arg| arg.to_string_lossy().into_owned())
                         .collect::<Vec<String>>()
@@ -164,22 +371,51 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                     
                     crate::modules::logger::log_info(&format!(" - PID: {} | Name: {} | Args: {}", pid_u32, name, args_str));
                     
-                    // 主进程通常没有 --type 参数，或者 args 很少
-                    // 注意：开发环境下 (cargo tauri dev) 可能会有 cargo 相关的进程，需要小心
-                    // 但这里 pids 列表已经通过 exe_path 过滤过了，应该是 Antigravity 的相关进程
-                    
+                    // 1. 优先尝试手动路径匹配
+                    if let (Some(ref m_path), Some(p_exe)) = (&manual_path, process.exe()) {
+                        if let Ok(p_path) = p_exe.canonicalize() {
+                            let m_path_str = m_path.to_string_lossy();
+                            let p_path_str = p_path.to_string_lossy();
+                            if let (Some(m_idx), Some(p_idx)) = (m_path_str.find(".app"), p_path_str.find(".app")) {
+                                if m_path_str[..m_idx+4] == p_path_str[..p_idx+4] {
+                                    // 深度校验：即便路径匹配，也必须排除 Helper 关键字和参数
+                                    let is_helper_by_args = args_str.contains("--type=");
+                                    let is_helper_by_name = name.to_lowercase().contains("helper") 
+                                        || name.to_lowercase().contains("plugin")
+                                        || name.to_lowercase().contains("renderer")
+                                        || name.to_lowercase().contains("gpu")
+                                        || name.to_lowercase().contains("crashpad")
+                                        || name.to_lowercase().contains("utility")
+                                        || name.to_lowercase().contains("audio")
+                                        || name.to_lowercase().contains("sandbox")
+                                        || name.to_lowercase().contains("language_server");
+
+                                    if !is_helper_by_args && !is_helper_by_name {
+                                        main_pid = Some(pid_u32);
+                                        crate::modules::logger::log_info(&format!("   => 识别为主进程 (匹配手动配置路径)"));
+                                        break; 
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 特征分析匹配（回退方案）
                     let is_helper_by_name = name.to_lowercase().contains("helper") 
                         || name.to_lowercase().contains("crashpad")
-                        || name.to_lowercase().contains("language_server");
+                        || name.to_lowercase().contains("utility")
+                        || name.to_lowercase().contains("audio")
+                        || name.to_lowercase().contains("sandbox")
+                        || name.to_lowercase().contains("language_server")
+                        || name.to_lowercase().contains("plugin")
+                        || name.to_lowercase().contains("renderer");
                         
                     let is_helper_by_args = args_str.contains("--type=");
                     
                     if !is_helper_by_name && !is_helper_by_args {
                         if main_pid.is_none() {
                             main_pid = Some(pid_u32);
-                            crate::modules::logger::log_info(&format!("   => 识别为主进程 (Name/Args排除匹配)"));
-                        } else {
-                            crate::modules::logger::log_warn(&format!("   => 发现多个疑似主进程，保留第一个"));
+                            crate::modules::logger::log_info(&format!("   => 识别为主进程 (Name/Args特征分析)"));
                         }
                     } else {
                          crate::modules::logger::log_info(&format!("   => 识别为辅助进程 (Helper/Args)"));
@@ -230,10 +466,10 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                         
                         if let Ok(result) = output {
                             if !result.status.success() {
-                                let error = String::from_utf8_lossy(&result.stderr);
-                                if !error.contains("No such process") { // "No matching processes" for killall, "No such process" for kill
-                                    crate::modules::logger::log_error(&format!("SIGKILL 进程 {} 失败: {}", pid, error));
-                                }
+                                 let error = String::from_utf8_lossy(&result.stderr);
+                                 if !error.contains("No such process") { // "No matching processes" for killall, "No such process" for kill
+                                     crate::modules::logger::log_error(&format!("SIGKILL 进程 {} 失败: {}", pid, error));
+                                 }
                             }
                         }
                     }
@@ -250,7 +486,9 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                 return Ok(());
             }
         } else {
-            crate::modules::logger::log_warn("未找到 Antigravity 进程");
+             // 只有当 pids 为空时才认为没在运行，不要在这里报错，因为可能是已经关闭了
+             crate::modules::logger::log_info("Antigravity 未在运行，无需关闭");
+             return Ok(());
         }
     }
 
@@ -263,12 +501,18 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
             system.refresh_processes(sysinfo::ProcessesToUpdate::All);
             
             let mut main_pid = None;
+
+            // 加载手动配置路径作为最高优先级参考
+            let manual_path = crate::modules::config::load_app_config()
+                .ok()
+                .and_then(|c| c.antigravity_executable)
+                .and_then(|p| std::path::PathBuf::from(p).canonicalize().ok());
             
             crate::modules::logger::log_info("正在分析 Linux 进程列表以识别主进程:");
             for pid_u32 in &pids {
                 let pid = sysinfo::Pid::from_u32(*pid_u32);
                 if let Some(process) = system.process(pid) {
-                    let name = process.name().to_string_lossy();
+                    let name = process.name().to_string_lossy().to_lowercase();
                     let args = process.cmd();
                     let args_str = args.iter()
                         .map(|arg| arg.to_string_lossy().into_owned())
@@ -277,18 +521,41 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                     
                     crate::modules::logger::log_info(&format!(" - PID: {} | Name: {} | Args: {}", pid_u32, name, args_str));
                     
-                    // 识别主进程：不带 --type= 参数且名字不包含 helper
-                    let is_helper = args_str.contains("--type=") 
-                        || name.to_lowercase().contains("helper")
-                        || name.to_lowercase().contains("crashpad");
-                        
-                    if !is_helper {
+                    // 1. 优先尝试手动路径匹配
+                    if let (Some(ref m_path), Some(p_exe)) = (&manual_path, process.exe()) {
+                        if let Ok(p_path) = p_exe.canonicalize() {
+                            if &p_path == m_path {
+                                // 确认不是 Helper
+                                let is_helper_by_args = args_str.contains("--type=");
+                                let is_helper_by_name = name.contains("helper") || name.contains("renderer") || name.contains("gpu") || name.contains("crashpad") || name.contains("utility") || name.contains("audio") || name.contains("sandbox");
+                                if !is_helper_by_args && !is_helper_by_name {
+                                    main_pid = Some(pid_u32);
+                                    crate::modules::logger::log_info(&format!("   => 识别为主进程 (匹配手动配置路径)"));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 特征分析匹配
+                    let is_helper_by_args = args_str.contains("--type=");
+                    let is_helper_by_name = name.contains("helper") 
+                        || name.contains("renderer")
+                        || name.contains("gpu")
+                        || name.contains("crashpad")
+                        || name.contains("utility")
+                        || name.contains("audio")
+                        || name.contains("sandbox")
+                        || name.contains("plugin")
+                        || name.contains("language_server");
+                    
+                    if !is_helper_by_args && !is_helper_by_name {
                         if main_pid.is_none() {
                             main_pid = Some(pid_u32);
-                            crate::modules::logger::log_info(&format!("   => 识别为主进程"));
+                            crate::modules::logger::log_info(&format!("   => 识别为主进程 (特征分析)"));
                         }
                     } else {
-                        crate::modules::logger::log_info(&format!("   => 识别为辅助进程"));
+                        crate::modules::logger::log_info(&format!("   => 识别为辅助进程 (Helper/Args)"));
                     }
                 }
             }
@@ -331,11 +598,8 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
                 }
             }
         } else {
-            crate::modules::logger::log_warn("未找到 Antigravity 进程，尝试使用 pkill (Case-Insensitive) 回退");
-            let _ = Command::new("pkill")
-                .args(["-i", "-9", "antigravity"])
-                .output();
-            thread::sleep(Duration::from_secs(1));
+            // pids 为空，说明没有检测到进程，或者都被排除逻辑排除了
+            crate::modules::logger::log_info("未找到需要关闭的 Antigravity 进程 (可能已被过滤或未运行)");
         }
     }
     
@@ -351,6 +615,55 @@ pub fn close_antigravity(timeout_secs: u64) -> Result<(), String> {
 /// 启动 Antigravity
 pub fn start_antigravity() -> Result<(), String> {
     crate::modules::logger::log_info("正在启动 Antigravity...");
+
+    // 优先从配置项加载手动指定的路径
+    let manual_path = crate::modules::config::load_app_config()
+        .ok()
+        .and_then(|c| c.antigravity_executable);
+
+    if let Some(mut path_str) = manual_path {
+        let mut path = std::path::PathBuf::from(&path_str);
+        
+        #[cfg(target_os = "macos")]
+        {
+            // 容错处理：如果指定的路径位于 .app 内部（比如误选了 Helper），则自动修正为 .app 目录
+            if let Some(app_idx) = path_str.find(".app") {
+                let corrected_app = &path_str[..app_idx + 4];
+                if corrected_app != path_str {
+                    crate::modules::logger::log_info(&format!("检测到 macOS 路径位于 .app 内部，自动修正为: {}", corrected_app));
+                    path_str = corrected_app.to_string();
+                    path = std::path::PathBuf::from(&path_str);
+                }
+            }
+        }
+
+        if path.exists() {
+            crate::modules::logger::log_info(&format!("使用手动配置路径启动: {}", path_str));
+            
+            #[cfg(target_os = "macos")]
+            {
+                // macOS 下如果是 .app 目录，用 open
+                if path_str.ends_with(".app") || path.is_dir() {
+                    Command::new("open").arg("-a").arg(&path_str).spawn()
+                        .map_err(|e| format!("启动失败 (open): {}", e))?;
+                } else {
+                    Command::new(&path_str).spawn()
+                        .map_err(|e| format!("启动失败 (direct): {}", e))?;
+                }
+            }
+            
+            #[cfg(not(target_os = "macos"))]
+            {
+                Command::new(&path_str).spawn()
+                    .map_err(|e| format!("启动失败: {}", e))?;
+            }
+            
+            crate::modules::logger::log_info("Antigravity 启动命令已发送 (手动路径)");
+            return Ok(());
+        } else {
+            crate::modules::logger::log_warn(&format!("手动配置路径不存在: {}，将回退到自动检测", path_str));
+        }
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -371,6 +684,7 @@ pub fn start_antigravity() -> Result<(), String> {
         // 尝试通过注册表或默认路径启动
         let result = Command::new("cmd")
             .args(["/C", "start", "antigravity://"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn();
         
         if result.is_err() {
@@ -385,7 +699,7 @@ pub fn start_antigravity() -> Result<(), String> {
             .map_err(|e| format!("启动失败: {}", e))?;
     }
 
-    crate::modules::logger::log_info("Antigravity 启动命令已发送");
+    crate::modules::logger::log_info("Antigravity 启动命令已发送 (默认检测)");
     Ok(())
 }
 
@@ -412,34 +726,74 @@ fn get_path_from_running_process() -> Option<std::path::PathBuf> {
     let mut system = System::new_all();
     system.refresh_all();
     
-    for process in system.processes().values() {
-        #[allow(unused_variables)]
+    let current_exe = get_current_exe_path();
+    let current_pid = std::process::id();
+
+    for (pid, process) in system.processes() {
+        let pid_u32 = pid.as_u32();
+        if pid_u32 == current_pid {
+            continue;
+        }
+
+        // 排除管理器自身进程
+        if let (Some(ref my_path), Some(p_exe)) = (&current_exe, process.exe()) {
+            if let Ok(p_path) = p_exe.canonicalize() {
+                if my_path == &p_path {
+                    continue;
+                }
+            }
+        }
+
         let name = process.name().to_string_lossy().to_lowercase();
         
         // 获取可执行文件路径
         if let Some(exe) = process.exe() {
-            let exe_path = exe.to_str().unwrap_or("").to_lowercase();
+            let exe_path = exe.to_string_lossy().to_lowercase();
             
+            // 通用的辅助进程排除逻辑
+            let args = process.cmd();
+            let args_str = args.iter()
+                .map(|arg| arg.to_string_lossy().to_lowercase())
+                .collect::<Vec<String>>()
+                .join(" ");
+            
+            let is_helper = args_str.contains("--type=") || 
+                           name.contains("helper") || 
+                           name.contains("plugin") || 
+                           name.contains("renderer") || 
+                           name.contains("gpu") ||
+                           name.contains("crashpad") ||
+                           name.contains("utility") ||
+                           name.contains("audio") ||
+                           name.contains("sandbox") ||
+                           exe_path.contains("crashpad");
+
             #[cfg(target_os = "macos")]
             {
-                // macOS: 检查 Antigravity.app
-                if exe_path.contains("antigravity.app") {
+                // macOS: 排除辅助进程，只匹配主程序，并检查 Frameworks
+                if exe_path.contains("antigravity.app") && !is_helper && !exe_path.contains("frameworks") {
+                    // 尝试提取 .app 路径以便更好地支持 open 命令
+                    if let Some(app_idx) = exe_path.find(".app") {
+                        let app_path_str = &exe.to_string_lossy()[..app_idx + 4];
+                        return Some(std::path::PathBuf::from(app_path_str));
+                    }
                     return Some(exe.to_path_buf());
                 }
             }
             
             #[cfg(target_os = "windows")]
             {
-                // Windows: 严格匹配进程名
-                if name == "antigravity.exe" {
+                // Windows: 严格匹配进程名且排除辅助进程
+                if name == "antigravity.exe" && !is_helper {
                     return Some(exe.to_path_buf());
                 }
             }
             
             #[cfg(target_os = "linux")]
             {
-                // Linux: 检查进程名或路径包含 antigravity
-                if name.contains("antigravity") || exe_path.contains("antigravity") {
+                // Linux: 检查进程名或路径包含 antigravity，排除辅助进程和管理器
+                if (name == "antigravity" || exe_path.contains("/antigravity")) && 
+                   !name.contains("tools") && !is_helper {
                     return Some(exe.to_path_buf());
                 }
             }

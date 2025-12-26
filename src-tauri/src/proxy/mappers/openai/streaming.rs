@@ -48,12 +48,42 @@ pub fn create_openai_sse_stream(
                                     let parts = candidate.and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array());
 
                                     let mut content_out = String::new();
+                                    let mut tool_calls = Vec::new();
                                     
                                     if let Some(parts_list) = parts {
                                         for part in parts_list {
+                                            // 思维链/推理部分
+                                            if let Some(thought) = part.get("thought").and_then(|t| t.as_str()) {
+                                                if !thought.is_empty() {
+                                                    content_out.push_str("<thought>\n");
+                                                    content_out.push_str(thought);
+                                                    content_out.push_str("\n</thought>\n\n");
+                                                }
+                                            }
+
                                             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                                 content_out.push_str(text);
                                             }
+
+                                            // 工具调用
+                                            if let Some(fc) = part.get("functionCall") {
+                                                let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "".to_string());
+                                                let id = fc.get("id").and_then(|v| v.as_str())
+                                                    .map(|s| s.to_string())
+                                                    .unwrap_or_else(|| format!("{}-{}", name, uuid::Uuid::new_v4()));
+
+                                                tool_calls.push(json!({
+                                                    "index": 0,
+                                                    "id": id,
+                                                    "type": "function",
+                                                    "function": {
+                                                        "name": name,
+                                                        "arguments": args
+                                                    }
+                                                }));
+                                            }
+
                                             if let Some(img) = part.get("inlineData") {
                                                 let mime_type = img.get("mimeType").and_then(|v| v.as_str()).unwrap_or("image/png");
                                                 let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
@@ -65,7 +95,7 @@ pub fn create_openai_sse_stream(
                                         }
                                     }
 
-                                    if content_out.is_empty() {
+                                    if content_out.is_empty() && tool_calls.is_empty() {
                                         // Skip empty chunks if no text or image was found
                                         // Unless it has a finish reason
                                         if actual_data.get("candidates").and_then(|c| c.get(0)).and_then(|c| c.get("finishReason")).is_none() {
@@ -93,7 +123,8 @@ pub fn create_openai_sse_stream(
                                             {
                                                 "index": 0,
                                                 "delta": {
-                                                    "content": content_out
+                                                    "content": if content_out.is_empty() { None } else { Some(content_out) },
+                                                    "tool_calls": if tool_calls.is_empty() { None } else { Some(tool_calls) }
                                                 },
                                                 "finish_reason": finish_reason
                                             }

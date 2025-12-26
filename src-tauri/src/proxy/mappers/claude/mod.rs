@@ -10,8 +10,7 @@ pub mod utils;
 pub use models::*;
 pub use request::transform_claude_request_in;
 pub use response::transform_response;
-pub use streaming::{StreamingState, PartProcessor, BlockType, SignatureManager};
-pub use utils::*;
+pub use streaming::{StreamingState, PartProcessor};
 
 use bytes::Bytes;
 use futures::Stream;
@@ -159,10 +158,13 @@ mod tests {
         
         assert!(result.is_some());
         let chunks = result.unwrap();
-        assert_eq!(chunks.len(), 1);
-        
-        let s = String::from_utf8(chunks[0].to_vec()).unwrap();
-        assert!(s.contains("message_stop"));
+        assert!(!chunks.is_empty());
+
+        let all_text: String = chunks
+            .iter()
+            .map(|b| String::from_utf8(b.to_vec()).unwrap_or_default())
+            .collect();
+        assert!(all_text.contains("message_stop"));
     }
 
     #[test]

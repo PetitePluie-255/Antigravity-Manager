@@ -2,12 +2,15 @@
 use serde_json::{json, Value};
 
 /// 包装请求体为 v1internal 格式
-pub fn wrap_request(body: &Value, project_id: &str, model_name: &str) -> Value {
-    // 优先使用传入的 model_name (通常来自 URL)，其次尝试从 body 获取
-    let final_model = if !model_name.is_empty() {
-        model_name
+pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value {
+    // 优先使用传入的 mapped_model，其次尝试从 body 获取
+    let original_model = body.get("model").and_then(|v| v.as_str()).unwrap_or(mapped_model);
+    
+    // 如果 mapped_model 是空的，则使用 original_model
+    let final_model_name = if !mapped_model.is_empty() {
+        mapped_model
     } else {
-        body.get("model").and_then(|v| v.as_str()).unwrap_or("gemini-2.5-pro")
+        original_model
     };
 
     // 复制 body 以便修改
@@ -17,15 +20,32 @@ pub fn wrap_request(body: &Value, project_id: &str, model_name: &str) -> Value {
     if let Some(obj) = inner_request.as_object_mut() {
         let gen_config = obj.entry("generationConfig").or_insert_with(|| json!({}));
         if let Some(gen_obj) = gen_config.as_object_mut() {
-            gen_obj.insert("maxOutputTokens".to_string(), json!(65535));
+            gen_obj.insert("maxOutputTokens".to_string(), json!(64000)); // Sync with others
         }
     }
 
-    // Use shared grounding logic
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(final_model, final_model);
+    // Use shared grounding/config logic
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(original_model, final_model_name);
     
-    tracing::info!("[Debug] Gemini Wrap: original='{}', final='{}', type='{}', has_image_config={}", 
-        final_model, config.final_model, config.request_type, config.image_config.is_some());
+    // Clean tool declarations (remove forbidden Schema fields like multipleOf)
+    if let Some(tools) = inner_request.get_mut("tools") {
+        if let Some(tools_arr) = tools.as_array_mut() {
+            for tool in tools_arr {
+                if let Some(decls) = tool.get_mut("functionDeclarations") {
+                    if let Some(decls_arr) = decls.as_array_mut() {
+                        for decl in decls_arr {
+                            if let Some(params) = decl.get_mut("parameters") {
+                                crate::proxy::common::json_schema::clean_json_schema(params);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::info!("[Debug] Gemini Wrap: original='{}', mapped='{}', final='{}', type='{}'", 
+        original_model, final_model_name, config.final_model, config.request_type);
     
     // Inject googleSearch tool if needed
     if config.inject_google_search {
