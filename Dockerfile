@@ -6,8 +6,8 @@ RUN npm install -g pnpm && pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm run build
 
-# Stage 2: Build Rust Backend
-FROM rust:1.83-slim AS backend-builder
+# Stage 2: Build Rust Backend (using nightly for edition2024 support)
+FROM rustlang/rust:nightly-slim AS backend-builder
 WORKDIR /app
 
 # Install build dependencies
@@ -22,7 +22,7 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
 
 # Copy source and build
 COPY src-tauri/ .
-RUN cargo build --release --bin antigravity-server --no-default-features --features web-server
+RUN CARGO_UNSTABLE_EDITION2024=1 cargo build --release --bin antigravity-server --no-default-features --features web-server
 
 # Stage 3: Production
 FROM debian:bookworm-slim
