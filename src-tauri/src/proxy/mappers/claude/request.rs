@@ -65,10 +65,13 @@ pub fn transform_claude_request_in(
     } else {
         crate::proxy::common::model_mapping::map_claude_model_to_gemini(&claude_req.model)
     };
-    
+
     // Use shared grounding logic
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(&claude_req.model, &mapped_model);
-    
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(
+        &claude_req.model,
+        &mapped_model,
+    );
+
     // Inject googleSearch tool if needed (and not already done by build_tools)
     if config.inject_google_search && !has_web_search_tool {
         crate::proxy::mappers::common_utils::inject_google_search_tool(&mut inner_request);
@@ -76,22 +79,22 @@ pub fn transform_claude_request_in(
 
     // Inject imageConfig if present (for image generation models)
     if let Some(image_config) = config.image_config {
-         if let Some(obj) = inner_request.as_object_mut() {
-             // 1. Remove tools (image generation does not support tools)
-             obj.remove("tools");
-             
-             // 2. Remove systemInstruction (image generation does not support system prompts)
-             obj.remove("systemInstruction");
+        if let Some(obj) = inner_request.as_object_mut() {
+            // 1. Remove tools (image generation does not support tools)
+            obj.remove("tools");
 
-             // 3. Clean generationConfig (remove thinkingConfig, responseMimeType, responseModalities etc.)
-             let gen_config = obj.entry("generationConfig").or_insert_with(|| json!({}));
-             if let Some(gen_obj) = gen_config.as_object_mut() {
-                 gen_obj.remove("thinkingConfig");
-                 gen_obj.remove("responseMimeType"); 
-                 gen_obj.remove("responseModalities");
-                 gen_obj.insert("imageConfig".to_string(), image_config);
-             }
-         }
+            // 2. Remove systemInstruction (image generation does not support system prompts)
+            obj.remove("systemInstruction");
+
+            // 3. Clean generationConfig (remove thinkingConfig, responseMimeType, responseModalities etc.)
+            let gen_config = obj.entry("generationConfig").or_insert_with(|| json!({}));
+            if let Some(gen_obj) = gen_config.as_object_mut() {
+                gen_obj.remove("thinkingConfig");
+                gen_obj.remove("responseMimeType");
+                gen_obj.remove("responseModalities");
+                gen_obj.insert("imageConfig".to_string(), image_config);
+            }
+        }
     }
 
     // 生成 requestId
@@ -176,7 +179,10 @@ fn build_contents(
                                 parts.push(json!({"text": text}));
                             }
                         }
-                        ContentBlock::Thinking { thinking, signature } => {
+                        ContentBlock::Thinking {
+                            thinking,
+                            signature,
+                        } => {
                             let mut part = json!({
                                 "text": thinking,
                                 "thought": true
@@ -196,7 +202,12 @@ fn build_contents(
                                 }));
                             }
                         }
-                        ContentBlock::ToolUse { id, name, input, signature } => {
+                        ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input,
+                            signature,
+                        } => {
                             let mut part = json!({
                                 "functionCall": {
                                     "name": name,
@@ -213,7 +224,11 @@ fn build_contents(
                             }
                             parts.push(part);
                         }
-                        ContentBlock::ToolResult { tool_use_id, content } => {
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            ..
+                        } => {
                             // 优先使用之前记录的 name，否则用 tool_use_id
                             let func_name = tool_id_to_name
                                 .get(tool_use_id)
@@ -227,6 +242,10 @@ fn build_contents(
                                     "id": tool_use_id
                                 }
                             }));
+                        }
+                        ContentBlock::RedactedThinking { data } => {
+                            // 处理 redacted thinking 块（跳过或转为空文本）
+                            tracing::debug!("Skipping redacted thinking block: {:?}", data);
                         }
                     }
                 }
@@ -243,10 +262,7 @@ fn build_contents(
 }
 
 /// 构建 Tools
-fn build_tools(
-    tools: &Option<Vec<Tool>>,
-    has_web_search: bool,
-) -> Result<Option<Value>, String> {
+fn build_tools(tools: &Option<Vec<Tool>>, has_web_search: bool) -> Result<Option<Value>, String> {
     if let Some(tools_list) = tools {
         if has_web_search {
             // Web Search 工具映射
@@ -297,8 +313,8 @@ fn build_generation_config(claude_req: &ClaudeRequest, has_web_search: bool) -> 
             if let Some(budget_tokens) = thinking.budget_tokens {
                 let mut budget = budget_tokens;
                 // gemini-2.5-flash 上限 24576
-                let is_flash_model = has_web_search
-                    || claude_req.model.contains("gemini-2.5-flash");
+                let is_flash_model =
+                    has_web_search || claude_req.model.contains("gemini-2.5-flash");
                 if is_flash_model {
                     budget = budget.min(24576);
                 }

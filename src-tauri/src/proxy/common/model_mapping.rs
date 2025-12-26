@@ -1,6 +1,6 @@
 // 模型名称映射
-use std::collections::HashMap;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
@@ -78,7 +78,11 @@ pub fn resolve_model_route(
 ) -> String {
     // 1. 检查自定义精确映射 (优先级最高)
     if let Some(target) = custom_mapping.get(original_model) {
-        crate::modules::logger::log_info(&format!("[Router] 使用自定义精确映射: {} -> {}", original_model, target));
+        tracing::info!(
+            "[Router] 使用自定义精确映射: {} -> {}",
+            original_model,
+            target
+        );
         return target.clone();
     }
 
@@ -86,18 +90,36 @@ pub fn resolve_model_route(
 
     // 2. 检查家族分组映射 (OpenAI 系)
     // GPT-4 系列 (含 GPT-4 经典, o1, o3 等, 排除 4o/mini/turbo)
-    if (lower_model.starts_with("gpt-4") && !lower_model.contains("o") && !lower_model.contains("mini") && !lower_model.contains("turbo")) || 
-       lower_model.starts_with("o1-") || lower_model.starts_with("o3-") || lower_model == "gpt-4" {
+    if (lower_model.starts_with("gpt-4")
+        && !lower_model.contains("o")
+        && !lower_model.contains("mini")
+        && !lower_model.contains("turbo"))
+        || lower_model.starts_with("o1-")
+        || lower_model.starts_with("o3-")
+        || lower_model == "gpt-4"
+    {
         if let Some(target) = openai_mapping.get("gpt-4-series") {
-            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4 系列映射: {} -> {}", original_model, target));
+            tracing::info!(
+                "[Router] 使用 GPT-4 系列映射: {} -> {}",
+                original_model,
+                target
+            );
             return target.clone();
         }
     }
-    
+
     // GPT-4o / 3.5 系列 (均衡与轻量, 含 4o, mini, turbo)
-    if lower_model.contains("4o") || lower_model.starts_with("gpt-3.5") || (lower_model.contains("mini") && !lower_model.contains("gemini")) || lower_model.contains("turbo") {
+    if lower_model.contains("4o")
+        || lower_model.starts_with("gpt-3.5")
+        || (lower_model.contains("mini") && !lower_model.contains("gemini"))
+        || lower_model.contains("turbo")
+    {
         if let Some(target) = openai_mapping.get("gpt-4o-series") {
-            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4o/3.5 系列映射: {} -> {}", original_model, target));
+            tracing::info!(
+                "[Router] 使用 GPT-4o/3.5 系列映射: {} -> {}",
+                original_model,
+                target
+            );
             return target.clone();
         }
     }
@@ -113,13 +135,17 @@ pub fn resolve_model_route(
         };
 
         if let Some(target) = anthropic_mapping.get(family_key) {
-            crate::modules::logger::log_warn(&format!("[Router] 使用 Anthropic 系列映射: {} -> {}", original_model, target));
+            tracing::warn!(
+                "[Router] 使用 Anthropic 系列映射: {} -> {}",
+                original_model,
+                target
+            );
             return target.clone();
         }
-        
+
         // 兜底兼容旧版精确映射
         if let Some(target) = anthropic_mapping.get(original_model) {
-             return target.clone();
+            return target.clone();
         }
     }
 
