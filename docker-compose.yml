@@ -7,9 +7,8 @@ services:
     volumes:
       - antigravity-data:/data
     environment:
-      - NODE_ENV=production
       - PORT=3000
-      - DATA_DIR=/home/Antigravity/data
+      - DATA_DIR=/data
     restart: unless-stopped
 
 volumes:

@@ -4,19 +4,16 @@ use axum::{
     body::Body,
     extract::{Json, State},
     http::{header, StatusCode},
-    response::{IntoResponse, Response, Sse},
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{json, Value};
-use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::proxy::mappers::claude::{
     transform_claude_request_in, transform_response, create_claude_sse_stream, ClaudeRequest,
 };
-use crate::proxy::upstream::client::UpstreamClient;
-use crate::proxy::token_manager::TokenManager;
 use crate::proxy::server::AppState;
 
 /// 处理 Claude messages 请求
@@ -37,12 +34,12 @@ pub async fn handle_messages(
     let token_manager = state.token_manager;
     
     // 确定方法和查询字符串
-    let method = if request.stream {
+    let _method = if request.stream {
         "streamGenerateContent"
     } else {
         "generateContent"
     };
-    let query_string = if request.stream { Some("alt=sse") } else { None };
+    let _query_string = if request.stream { Some("alt=sse") } else { None };
 
     let max_attempts = token_manager.len().max(1);
 

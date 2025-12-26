@@ -1,43 +1,62 @@
-mod models;
-mod modules;
-mod commands;
-mod utils;
-mod proxy;  // 反代服务模块
+//! Antigravity Tools 库
+//!
+//! 支持两种运行模式:
+//! - Tauri 桌面应用 (默认)
+//! - 独立 Web 服务器 (`--no-default-features --features web-server`)
+
+// 核心模块 (无 Tauri 依赖，始终编译)
+pub mod core;
 pub mod error;
+pub mod proxy;
+pub mod web; // 代理模块 (始终编译，用于模型对话)
 
-use tauri::Manager;
+// Tauri 相关模块 (仅在 tauri-app feature 启用时编译)
+#[cfg(feature = "tauri-app")]
+mod commands;
+#[cfg(feature = "tauri-app")]
+mod models;
+#[cfg(feature = "tauri-app")]
+mod modules;
+#[cfg(feature = "tauri-app")]
+mod utils;
+
+// Tauri 应用入口
+#[cfg(feature = "tauri-app")]
 use modules::logger;
+#[cfg(feature = "tauri-app")]
+use tauri::Manager;
 
-// 测试命令
+#[cfg(feature = "tauri-app")]
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[cfg(feature = "tauri-app")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 初始化日志
     logger::init_logger();
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app.get_webview_window("main")
-                .map(|window| {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    #[cfg(target_os = "macos")]
-                    app.set_activation_policy(tauri::ActivationPolicy::Regular).unwrap_or(());
-                });
+            let _ = app.get_webview_window("main").map(|window| {
+                let _ = window.show();
+                let _ = window.set_focus();
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Regular)
+                    .unwrap_or(());
+            });
         }))
         .manage(commands::proxy::ProxyServiceState::new())
         .setup(|app| {
             println!("Setup starting...");
             modules::tray::create_tray(app.handle())?;
             println!("Tray created");
-            
+
             // 自动启动反代服务
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -50,7 +69,9 @@ pub fn run() {
                             config.proxy,
                             state,
                             handle.clone(),
-                        ).await {
+                        )
+                        .await
+                        {
                             eprintln!("自动启动反代服务失败: {}", e);
                         } else {
                             println!("反代服务自动启动成功");
@@ -58,7 +79,7 @@ pub fn run() {
                     }
                 }
             });
-            
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -67,7 +88,10 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 {
                     use tauri::Manager;
-                    window.app_handle().set_activation_policy(tauri::ActivationPolicy::Accessory).unwrap_or(());
+                    window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory)
+                        .unwrap_or(());
                 }
                 api.prevent_close();
             }

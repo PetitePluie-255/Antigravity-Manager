@@ -1,9 +1,8 @@
 use axum::{
     Router,
     routing::{get, post},
-    extract::{State, DefaultBodyLimit},
-    response::{IntoResponse, Response, sse::{Event, Sse}},
-    http::StatusCode,
+    extract::DefaultBodyLimit,
+    response::{IntoResponse, Response},
     Json,
 };
 use std::sync::Arc;
@@ -62,7 +61,7 @@ impl AxumServer {
         anthropic_mapping: std::collections::HashMap<String, String>,
         openai_mapping: std::collections::HashMap<String, String>,
         custom_mapping: std::collections::HashMap<String, String>,
-        request_timeout: u64,
+        _request_timeout: u64,
         upstream_proxy: crate::proxy::config::UpstreamProxyConfig,
     ) -> Result<(Self, tokio::task::JoinHandle<()>), String> {
         let mapping_state = Arc::new(tokio::sync::RwLock::new(anthropic_mapping));

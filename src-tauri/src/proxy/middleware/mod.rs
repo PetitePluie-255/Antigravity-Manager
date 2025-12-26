@@ -6,4 +6,3 @@ pub mod logging;
 
 pub use auth::*;
 pub use cors::*;
-pub use logging::*;

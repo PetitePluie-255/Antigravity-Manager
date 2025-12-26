@@ -72,7 +72,7 @@ pub fn resolve_request_config(original_model: &str, mapped_model: &str) -> Reque
 /// Returns (image_config, clean_model_name)
 fn parse_image_config(model_name: &str) -> (Value, String) {
     let mut aspect_ratio = "1:1";
-    let mut image_size = "1024x1024"; // Default, not explicitly sent unless 4k/hd
+    let _image_size = "1024x1024"; // Default, not explicitly sent unless 4k/hd
 
     if model_name.contains("-16x9") { aspect_ratio = "16:9"; }
     else if model_name.contains("-9x16") { aspect_ratio = "9:16"; }

@@ -13,7 +13,7 @@ import {
 import { useAccountStore } from "../../stores/useAccountStore";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { isTauri } from "../../utils/platform";
+import { isTauri, apiCall } from "../../utils/platform";
 
 interface AddAccountDialogProps {
   onAdd: (email: string, refreshToken: string) => Promise<void>;
@@ -247,50 +247,32 @@ function AddAccountDialog({ onAdd }: AddAccountDialogProps) {
     setMessage(`${actionName}...`);
 
     try {
-      const text = await file.text();
-      let accounts = [];
+      const content = await file.text();
+      const format = file.name.endsWith(".csv") ? "csv" : "json";
 
-      try {
-        // Try parsing as standard JSON export
-        const json = JSON.parse(text);
-        if (Array.isArray(json)) {
-          accounts = json;
-        } else if (json.accounts && Array.isArray(json.accounts)) {
-          // Handle { accounts: [...] } structure
-          accounts = json.accounts;
-        }
-      } catch (e) {
-        throw new Error("无效的 JSON 文件");
-      }
+      // 使用后端 API 进行批量导入
+      const result = await apiCall<{
+        total: number;
+        success: number;
+        failed: number;
+        errors: string[];
+      }>("import_accounts_file", { content, format });
 
-      if (accounts.length === 0) {
-        throw new Error("文件中未找到账号数据");
-      }
-
-      // Batch add accounts
-      let successCount = 0;
-      for (const acc of accounts) {
-        if (acc.email && acc.refresh_token) {
-          try {
-            await onAdd(acc.email, acc.refresh_token);
-            successCount++;
-          } catch (e) {
-            console.warn("Import failed for one account:", e);
-          }
-        }
-      }
-
-      if (successCount > 0) {
+      if (result.success > 0) {
         setStatus("success");
         setMessage(
-          t("accounts.add.token.batch_success", { count: successCount })
+          t("accounts.add.token.batch_success", { count: result.success })
         );
+        // 刷新账号列表
+        // 账号列表会通过事件自动刷新
         setTimeout(() => {
           setIsOpen(false);
           resetState();
         }, 1500);
+      } else if (result.failed > 0) {
+        throw new Error(result.errors.join("; "));
       } else {
-        throw new Error("所有账号导入失败");
+        throw new Error("文件中未找到有效账号数据");
       }
     } catch (error) {
       setStatus("error");

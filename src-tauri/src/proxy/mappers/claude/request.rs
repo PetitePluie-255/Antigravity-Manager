@@ -2,7 +2,6 @@
 // 对应 transformClaudeRequestIn
 
 use super::models::*;
-use crate::proxy::common::model_mapping::map_claude_model_to_gemini;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 

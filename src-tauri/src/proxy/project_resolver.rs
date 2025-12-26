@@ -4,14 +4,17 @@ use serde_json::Value;
 /// 这是获取 cloudaicompanionProject 的正确方式
 pub async fn fetch_project_id(access_token: &str) -> Result<String, String> {
     let url = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
-    
+
     let request_body = serde_json::json!({
         "metadata": {
             "ideType": "ANTIGRAVITY"
         }
     });
-    
-    let client = crate::utils::http::create_client(30);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
     let response = client
         .post(url)
         .bearer_auth(access_token)
@@ -22,23 +25,23 @@ pub async fn fetch_project_id(access_token: &str) -> Result<String, String> {
         .send()
         .await
         .map_err(|e| format!("loadCodeAssist 请求失败: {}", e))?;
-    
+
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(format!("loadCodeAssist 返回错误 {}: {}", status, body));
     }
-    
-    let data: Value = response.json()
+
+    let data: Value = response
+        .json()
         .await
         .map_err(|e| format!("解析响应失败: {}", e))?;
-    
+
     // 提取 cloudaicompanionProject
-    if let Some(project_id) = data.get("cloudaicompanionProject")
-        .and_then(|v| v.as_str()) {
+    if let Some(project_id) = data.get("cloudaicompanionProject").and_then(|v| v.as_str()) {
         return Ok(project_id.to_string());
     }
-    
+
     // 如果没有返回 project_id，说明账号无资格
     Err("账号无资格获取 cloudaicompanionProject".to_string())
 }
@@ -47,14 +50,14 @@ pub async fn fetch_project_id(access_token: &str) -> Result<String, String> {
 /// 格式：{形容词}-{名词}-{5位随机字符}
 pub fn generate_mock_project_id() -> String {
     use rand::Rng;
-    
+
     let adjectives = ["useful", "bright", "swift", "calm", "bold"];
     let nouns = ["fuze", "wave", "spark", "flow", "core"];
-    
+
     let mut rng = rand::thread_rng();
     let adj = adjectives[rng.gen_range(0..adjectives.len())];
     let noun = nouns[rng.gen_range(0..nouns.len())];
-    
+
     // 生成5位随机字符（base36）
     let random_num: String = (0..5)
         .map(|_| {
@@ -63,6 +66,6 @@ pub fn generate_mock_project_id() -> String {
             chars.chars().nth(idx).unwrap()
         })
         .collect();
-    
+
     format!("{}-{}-{}", adj, noun, random_num)
 }

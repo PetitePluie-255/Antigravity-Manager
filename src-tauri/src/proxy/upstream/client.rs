@@ -248,7 +248,7 @@ impl UpstreamClient {
     /// 解析时间间隔字符串
     /// 支持格式: "1.5s", "200ms", "1h16m0.667s"
     fn parse_duration_ms(&self, duration_str: &str) -> Option<u64> {
-        use regex::Regex;
+        
         
         // 简化版本，支持主要格式
         // 完整实现需要 regex，这里先做简单的

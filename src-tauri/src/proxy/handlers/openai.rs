@@ -65,7 +65,7 @@ pub async fn handle_chat_completions(
                 use crate::proxy::mappers::openai::streaming::create_openai_sse_stream;
                 use axum::response::Response;
                 use axum::body::Body;
-                use futures::StreamExt;
+                
 
                 let gemini_stream = response.bytes_stream();
                 let openai_stream = create_openai_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());

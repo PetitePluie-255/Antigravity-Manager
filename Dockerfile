@@ -1,54 +1,48 @@
 # Stage 1: Build Frontend
 FROM node:20-slim AS frontend-builder
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json package-lock.json pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
-# Stage 2: Build Backend
-FROM node:20-slim AS backend-builder
-WORKDIR /app/server
-COPY server/package.json server/package-lock.json ./
-# Install build tools for native modules (better-sqlite3)
+# Stage 2: Build Rust Backend
+FROM rust:1.75-slim AS backend-builder
+WORKDIR /app
+
+# Install build dependencies
 RUN apt-get update && \
-    apt-get install -y python3 make g++ build-essential && \
+    apt-get install -y pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
-RUN npm ci
-COPY server/ .
-RUN npm run build
-# Prune dev dependencies (keep native modules)
-RUN npm prune --production
-# Prune dev dependencies so we can copy only prod deps later
+
+# Copy Cargo files first for caching
+COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs && \
+    cargo build --release --no-default-features --features web-server 2>/dev/null || true
+
+# Copy source and build
+COPY src-tauri/ .
+RUN cargo build --release --bin antigravity-server --no-default-features --features web-server
 
 # Stage 3: Production
-FROM node:20-slim
+FROM debian:bookworm-slim
 WORKDIR /app
 
-# Install required build tools for better-sqlite3 and healthcheck
-# Install required build tools for better-sqlite3 and healthcheck
+# Install runtime dependencies
 RUN apt-get update && \
-    apt-get install -y python3 make g++ build-essential curl python-is-python3 && \
+    apt-get install -y ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
+# Copy Rust backend binary
+COPY --from=backend-builder /app/target/release/antigravity-server /usr/local/bin/
 
-# Copy backend artifacts
-COPY --from=backend-builder /app/server/dist ./server
-COPY --from=backend-builder /app/server/package.json ./server/
-COPY --from=backend-builder /app/server/node_modules ./server/node_modules
-
-WORKDIR /app/server
-# No need to install or rebuild, just use the copied modules
-
-# Copy frontend
-WORKDIR /app
+# Copy frontend static files
 COPY --from=frontend-builder /app/dist ./dist
 
 # Create data directory
 RUN mkdir -p /data
 
 # Environment
-ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATA_DIR=/data
 ENV STATIC_PATH=/app/dist
@@ -57,6 +51,6 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/ || exit 1
+    CMD curl -f http://localhost:3000/healthz || exit 1
 
-CMD ["node", "server/index.js"]
+CMD ["antigravity-server", "--port", "3000", "--data-dir", "/data"]
