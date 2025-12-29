@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 # Copy source files
 COPY src/ ./src/
 COPY public/ ./public/
-COPY index.html vite.config.ts tsconfig*.json tailwind.config.js postcss.config.js ./
+COPY index.html vite.config.ts tsconfig*.json tailwind.config.js postcss.config.cjs ./
 
 # Build frontend
 RUN pnpm run build
