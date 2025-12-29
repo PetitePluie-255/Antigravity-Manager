@@ -5,7 +5,8 @@ services:
       network: host
     container_name: antigravity-manager
     ports:
-      - "3000:3000"
+      - "3000:3000" # 管理界面
+      - "8045:8045" # API 反代
     volumes:
       - antigravity-data:/data
     environment:
