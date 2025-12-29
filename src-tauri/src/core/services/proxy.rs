@@ -75,7 +75,15 @@ impl ProxyServiceManager {
         };
 
         // 使用完整的 AxumServer 启动代理
+        // 根据 allow_lan_access 配置决定绑定地址
+        let host = if config.allow_lan_access {
+            "0.0.0.0".to_string()
+        } else {
+            "127.0.0.1".to_string()
+        };
+
         let (server, handle) = AxumServer::start(
+            host,
             config.port,
             token_manager.clone(),
             config.anthropic_mapping.clone(),

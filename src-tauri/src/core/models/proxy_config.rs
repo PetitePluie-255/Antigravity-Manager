@@ -8,10 +8,10 @@ use std::collections::HashMap;
 pub struct ProxyConfig {
     /// 是否启用反代服务
     pub enabled: bool,
-    
+
     /// 监听端口
     pub port: u16,
-    
+
     /// API 密钥
     pub api_key: String,
 
@@ -37,6 +37,10 @@ pub struct ProxyConfig {
     /// 上游代理配置
     #[serde(default)]
     pub upstream_proxy: UpstreamProxyConfig,
+
+    /// 是否允许局域网访问
+    #[serde(default)]
+    pub allow_lan_access: bool,
 }
 
 /// 上游代理配置
@@ -60,10 +64,11 @@ impl Default for ProxyConfig {
             custom_mapping: HashMap::new(),
             request_timeout: default_request_timeout(),
             upstream_proxy: UpstreamProxyConfig::default(),
+            allow_lan_access: false,
         }
     }
 }
 
 fn default_request_timeout() -> u64 {
-    120  // 默认 120 秒
+    120 // 默认 120 秒
 }

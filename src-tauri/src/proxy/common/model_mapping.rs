@@ -128,11 +128,19 @@ pub fn resolve_model_route(
     if lower_model.starts_with("gpt-5") {
         // 优先使用 gpt-5-series 映射，如果没有则使用 gpt-4-series
         if let Some(target) = openai_mapping.get("gpt-5-series") {
-            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-5 系列映射: {} -> {}", original_model, target));
+            tracing::info!(
+                "[Router] 使用 GPT-5 系列映射: {} -> {}",
+                original_model,
+                target
+            );
             return target.clone();
         }
         if let Some(target) = openai_mapping.get("gpt-4-series") {
-            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4 系列映射 (GPT-5 fallback): {} -> {}", original_model, target));
+            tracing::info!(
+                "[Router] 使用 GPT-4 系列映射 (GPT-5 fallback): {} -> {}",
+                original_model,
+                target
+            );
             return target.clone();
         }
     }
