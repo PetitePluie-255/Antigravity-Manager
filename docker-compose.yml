@@ -10,7 +10,7 @@ services:
     volumes:
       - antigravity-data:/data
     environment:
-      - PORT=3000
+      - PORT=30000
       - DATA_DIR=/data
       - STATIC_DIR=/app/dist
       - BIND_ADDRESS=0.0.0.0

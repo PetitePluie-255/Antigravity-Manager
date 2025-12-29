@@ -12,13 +12,12 @@ pub struct ProxyConfig {
     /// - true: 允许局域网访问 0.0.0.0
     #[serde(default)]
     pub allow_lan_access: bool,
-    
+
     /// 监听端口
     pub port: u16,
-    
+
     /// API 密钥
     pub api_key: String,
-    
 
     /// 是否自动启动
     pub auto_start: bool,
@@ -71,14 +70,27 @@ impl Default for ProxyConfig {
 }
 
 fn default_request_timeout() -> u64 {
-    120  // 默认 120 秒,原来 60 秒太短
+    120 // 默认 120 秒,原来 60 秒太短
 }
 
 impl ProxyConfig {
     /// 获取实际的监听地址
+    /// - 环境变量 PROXY_BIND_ADDRESS 优先
+    /// - 环境变量 BIND_ADDRESS=0.0.0.0 时也返回 0.0.0.0
     /// - allow_lan_access = false: 返回 "127.0.0.1"（默认，隐私优先）
     /// - allow_lan_access = true: 返回 "0.0.0.0"（允许局域网访问）
     pub fn get_bind_address(&self) -> &str {
+        // Docker 环境优先检查环境变量
+        if let Ok(addr) = std::env::var("PROXY_BIND_ADDRESS") {
+            if addr == "0.0.0.0" {
+                return "0.0.0.0";
+            }
+        }
+        if let Ok(addr) = std::env::var("BIND_ADDRESS") {
+            if addr == "0.0.0.0" {
+                return "0.0.0.0";
+            }
+        }
         if self.allow_lan_access {
             "0.0.0.0"
         } else {
