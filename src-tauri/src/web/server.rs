@@ -105,6 +105,7 @@ impl WebServer {
     /// 启动服务器
     pub async fn run(self) -> Result<(), String> {
         use axum::Router;
+        use tower_http::services::ServeFile;
 
         // 构建 API 路由
         let api_routes = routes::build_routes(self.state.clone());
@@ -113,13 +114,13 @@ impl WebServer {
         let app = if let Some(static_path) = &self.static_dir {
             if static_path.exists() {
                 println!("📦 静态文件目录: {:?}", static_path);
+                let index_path = static_path.join("index.html");
                 // API 路由优先，静态文件作为 fallback
+                // 对于 SPA，未匹配的路径返回 index.html
                 Router::new().merge(api_routes).fallback_service(
                     ServeDir::new(static_path)
                         .append_index_html_on_directories(true)
-                        .fallback(
-                            ServeDir::new(static_path).append_index_html_on_directories(true),
-                        ),
+                        .fallback(ServeFile::new(index_path)),
                 )
             } else {
                 println!("⚠️  静态文件目录不存在: {:?}", static_path);
