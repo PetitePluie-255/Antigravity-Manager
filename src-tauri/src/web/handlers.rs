@@ -306,8 +306,11 @@ pub struct StartOAuthResponse {
 }
 
 pub async fn start_oauth(State(state): State<Arc<WebAppState>>) -> Response {
-    // 使用固定的回调地址（Web 服务器端口）
-    let redirect_uri = "http://127.0.0.1:3000/api/oauth/callback".to_string();
+    // 从环境变量获取回调基础 URL，默认为本地开发地址
+    let base_url = std::env::var("OAUTH_CALLBACK_BASE")
+        .or_else(|_| std::env::var("BASE_URL"))
+        .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let redirect_uri = format!("{}/api/oauth/callback", base_url.trim_end_matches('/'));
 
     // 生成授权 URL
     let auth_url = crate::core::services::oauth::get_auth_url(&redirect_uri);
