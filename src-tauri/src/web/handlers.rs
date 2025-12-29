@@ -386,7 +386,12 @@ pub async fn oauth_callback(
         let pending = state.oauth_pending.read().await;
         match pending.as_ref() {
             Some(p) => p.redirect_uri.clone(),
-            None => "http://127.0.0.1:3000/api/oauth/callback".to_string(),
+            None => {
+                let base_url = std::env::var("OAUTH_CALLBACK_BASE")
+                    .or_else(|_| std::env::var("BASE_URL"))
+                    .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+                format!("{}/api/oauth/callback", base_url.trim_end_matches('/'))
+            }
         }
     };
 
