@@ -18,7 +18,7 @@ COPY . .
 RUN pnpm run build
 
 # Stage 2: Build Rust Backend
-FROM rust:1.87-slim-bookworm AS backend-builder
+FROM rustlang/rust:nightly-slim AS backend-builder
 WORKDIR /app
 
 # Install build dependencies
