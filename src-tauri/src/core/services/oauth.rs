@@ -3,9 +3,17 @@
 
 use serde::{Deserialize, Serialize};
 
-// Google OAuth 配置
-const CLIENT_ID: &str = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
-const CLIENT_SECRET: &str = "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";
+// Google OAuth 配置 - 从环境变量获取或使用默认值
+fn get_client_id() -> String {
+    std::env::var("GOOGLE_CLIENT_ID").unwrap_or_else(|_| {
+        "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com".to_string()
+    })
+}
+
+fn get_client_secret() -> String {
+    std::env::var("GOOGLE_CLIENT_SECRET")
+        .unwrap_or_else(|_| "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".to_string())
+}
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -59,8 +67,9 @@ pub fn get_auth_url(redirect_uri: &str) -> String {
     ]
     .join(" ");
 
-    let params = vec![
-        ("client_id", CLIENT_ID),
+    let client_id = get_client_id();
+    let params: Vec<(&str, &str)> = vec![
+        ("client_id", &client_id),
         ("redirect_uri", redirect_uri),
         ("response_type", "code"),
         ("scope", &scopes),
@@ -80,9 +89,11 @@ pub async fn exchange_code(code: &str, redirect_uri: &str) -> Result<TokenRespon
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
+    let client_id = get_client_id();
+    let client_secret = get_client_secret();
     let params = [
-        ("client_id", CLIENT_ID),
-        ("client_secret", CLIENT_SECRET),
+        ("client_id", client_id.as_str()),
+        ("client_secret", client_secret.as_str()),
         ("code", code),
         ("redirect_uri", redirect_uri),
         ("grant_type", "authorization_code"),
@@ -127,9 +138,11 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<TokenResponse, 
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
+    let client_id = get_client_id();
+    let client_secret = get_client_secret();
     let params = [
-        ("client_id", CLIENT_ID),
-        ("client_secret", CLIENT_SECRET),
+        ("client_id", client_id.as_str()),
+        ("client_secret", client_secret.as_str()),
         ("refresh_token", refresh_token),
         ("grant_type", "refresh_token"),
     ];
