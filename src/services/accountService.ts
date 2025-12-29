@@ -158,9 +158,11 @@ export async function startOAuthLogin(): Promise<Account> {
 }
 
 export async function completeOAuthLogin(): Promise<Account> {
-  ensureTauriEnvironment();
+  if (!isTauri()) {
+    throw new Error("桌面应用专用功能");
+  }
   try {
-    return await invoke("complete_oauth_login");
+    return await apiCall("complete_oauth_login");
   } catch (error) {
     if (typeof error === "string") {
       if (error.includes("Refresh Token") || error.includes("refresh_token")) {
@@ -204,7 +206,10 @@ export async function importFromDb(): Promise<Account> {
 }
 
 export async function importFromCustomDb(path: string): Promise<Account> {
-  return await invoke("import_custom_db", { path });
+  if (!isTauri()) {
+    throw new Error("从自定义数据库导入仅在桌面应用中可用。");
+  }
+  return await apiCall("import_custom_db", { path });
 }
 
 export async function syncAccountFromDb(): Promise<Account | null> {
