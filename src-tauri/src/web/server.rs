@@ -1,9 +1,11 @@
 //! Web 服务器
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 
 use super::routes;
 use crate::core::models::Account;
@@ -68,35 +70,78 @@ impl WebAppState {
 pub struct WebServer {
     port: u16,
     state: Arc<WebAppState>,
+    static_dir: Option<PathBuf>,
 }
 
 impl WebServer {
     /// 创建新的 Web 服务器
     pub fn new(port: u16) -> Result<Self, String> {
         let state = Arc::new(WebAppState::new()?);
-        Ok(Self { port, state })
+        let static_dir = std::env::var("STATIC_DIR")
+            .or_else(|_| std::env::var("STATIC_PATH"))
+            .ok()
+            .map(PathBuf::from);
+        Ok(Self {
+            port,
+            state,
+            static_dir,
+        })
     }
 
     /// 从指定数据目录创建
     pub fn with_data_dir(port: u16, data_dir: std::path::PathBuf) -> Result<Self, String> {
         let state = Arc::new(WebAppState::with_data_dir(data_dir)?);
-        Ok(Self { port, state })
+        let static_dir = std::env::var("STATIC_DIR")
+            .or_else(|_| std::env::var("STATIC_PATH"))
+            .ok()
+            .map(PathBuf::from);
+        Ok(Self {
+            port,
+            state,
+            static_dir,
+        })
     }
 
     /// 启动服务器
     pub async fn run(self) -> Result<(), String> {
-        // 构建路由
-        let app = routes::build_routes(self.state.clone())
-            // 添加 CORS 支持
-            .layer(
-                CorsLayer::new()
-                    .allow_origin(Any)
-                    .allow_methods(Any)
-                    .allow_headers(Any),
-            );
+        use axum::Router;
 
-        // 绑定地址
-        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
+        // 构建 API 路由
+        let api_routes = routes::build_routes(self.state.clone());
+
+        // 构建完整路由
+        let app = if let Some(static_path) = &self.static_dir {
+            if static_path.exists() {
+                println!("📦 静态文件目录: {:?}", static_path);
+                // API 路由优先，静态文件作为 fallback
+                Router::new().merge(api_routes).fallback_service(
+                    ServeDir::new(static_path)
+                        .append_index_html_on_directories(true)
+                        .fallback(
+                            ServeDir::new(static_path).append_index_html_on_directories(true),
+                        ),
+                )
+            } else {
+                println!("⚠️  静态文件目录不存在: {:?}", static_path);
+                api_routes
+            }
+        } else {
+            api_routes
+        };
+
+        // 添加 CORS 支持
+        let app = app.layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
+
+        // 绑定地址 - 在 Docker 中需要绑定 0.0.0.0
+        let bind_addr = std::env::var("BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let addr: SocketAddr = format!("{}:{}", bind_addr, self.port)
+            .parse()
+            .map_err(|e| format!("无效的地址: {}", e))?;
 
         println!("🚀 Web 服务器启动在 http://{}", addr);
         println!("📁 数据目录: {:?}", self.state.storage.data_dir());

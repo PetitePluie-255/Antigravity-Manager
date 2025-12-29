@@ -52,6 +52,13 @@ pub fn build_routes(state: Arc<WebAppState>) -> Router {
         // 日志 API
         .route("/api/proxy/logs", get(handlers::get_proxy_logs))
         .route("/api/proxy/logs/clear", post(handlers::clear_proxy_logs))
+        // 系统相关 API
+        .route("/api/system/data-dir", get(handlers::get_data_dir_path))
+        .route(
+            "/api/system/check-updates",
+            get(handlers::check_for_updates),
+        )
+        .route("/api/logs/clear", post(handlers::clear_log_cache))
         // 健康检查
         .route("/healthz", get(handlers::health_check));
 

@@ -1,13 +1,13 @@
 //! 代理日志存储
 //! 使用内存环形缓冲区存储日志
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
 /// 代理日志条目
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyLogEntry {
     pub id: u64,
     pub timestamp: i64,

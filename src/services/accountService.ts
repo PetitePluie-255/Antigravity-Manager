@@ -40,7 +40,25 @@ export interface RefreshStats {
 }
 
 export async function refreshAllQuotas(): Promise<RefreshStats> {
-  return await apiCall("refresh_all_quotas");
+  const response = await apiCall<{
+    success_count?: number;
+    error_count?: number;
+    // Tauri 模式返回的字段
+    total?: number;
+    success?: number;
+    failed?: number;
+    details?: string[];
+  }>("refresh_all_quotas");
+
+  // 兼容 Web API 和 Tauri API 的不同响应格式
+  return {
+    total:
+      response.total ??
+      (response.success_count ?? 0) + (response.error_count ?? 0),
+    success: response.success ?? response.success_count ?? 0,
+    failed: response.failed ?? response.error_count ?? 0,
+    details: response.details ?? [],
+  };
 }
 
 // OAuth 登录状态（用于 Web 端取消）
@@ -140,18 +158,18 @@ export async function startOAuthLogin(): Promise<Account> {
 }
 
 export async function completeOAuthLogin(): Promise<Account> {
-    ensureTauriEnvironment();
-    try {
-        return await invoke('complete_oauth_login');
-    } catch (error) {
-        if (typeof error === 'string') {
-            if (error.includes('Refresh Token') || error.includes('refresh_token')) {
-                throw error;
-            }
-            throw `OAuth 授权失败: ${error}`;
-        }
+  ensureTauriEnvironment();
+  try {
+    return await invoke("complete_oauth_login");
+  } catch (error) {
+    if (typeof error === "string") {
+      if (error.includes("Refresh Token") || error.includes("refresh_token")) {
         throw error;
+      }
+      throw `OAuth 授权失败: ${error}`;
     }
+    throw error;
+  }
 }
 
 export async function cancelOAuthLogin(): Promise<void> {
@@ -186,7 +204,7 @@ export async function importFromDb(): Promise<Account> {
 }
 
 export async function importFromCustomDb(path: string): Promise<Account> {
-    return await invoke('import_custom_db', { path });
+  return await invoke("import_custom_db", { path });
 }
 
 export async function syncAccountFromDb(): Promise<Account | null> {

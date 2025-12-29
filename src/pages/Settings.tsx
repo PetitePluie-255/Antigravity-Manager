@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, Github, User, MessageCircle, ExternalLink, RefreshCw, Sparkles } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { apiCall, isTauri } from '../utils/platform';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useConfigStore } from '../stores/useConfigStore';
 import { AppConfig } from '../types/config';
@@ -51,7 +51,7 @@ function Settings() {
         loadConfig();
 
         // 获取真实数据目录路径
-        invoke<string>('get_data_dir_path')
+        apiCall<string>('get_data_dir_path')
             .then(path => setDataDirPath(path))
             .catch(err => console.error('Failed to get data dir:', err));
     }, [loadConfig]);
@@ -73,7 +73,7 @@ function Settings() {
 
     const confirmClearLogs = async () => {
         try {
-            await invoke('clear_log_cache');
+            await apiCall('clear_log_cache');
             showToast(t('settings.advanced.logs_cleared'), 'success');
         } catch (error) {
             showToast(`${t('common.error')}: ${error}`, 'error');
@@ -83,7 +83,7 @@ function Settings() {
 
     const handleOpenDataDir = async () => {
         try {
-            await invoke('open_data_folder');
+            await apiCall('open_data_folder');
         } catch (error) {
             showToast(`${t('common.error')}: ${error}`, 'error');
         }
@@ -123,7 +123,7 @@ function Settings() {
 
     const handleDetectAntigravityPath = async () => {
         try {
-            const path = await invoke<string>('get_antigravity_path', { bypassConfig: true });
+            const path = await apiCall<string>('get_antigravity_path', { bypassConfig: true });
             setFormData({ ...formData, antigravity_executable: path });
             showToast(t('settings.advanced.antigravity_path_detected'), 'success');
         } catch (error) {
@@ -135,7 +135,7 @@ function Settings() {
         setIsCheckingUpdate(true);
         setUpdateInfo(null);
         try {
-            const result = await invoke<{
+            const result = await apiCall<{
                 has_update: boolean;
                 latest_version: string;
                 current_version: string;
@@ -267,7 +267,7 @@ function Settings() {
                                     onChange={async (e) => {
                                         const enabled = e.target.value === 'enabled';
                                         try {
-                                            await invoke('toggle_auto_launch', { enable: enabled });
+                                            await apiCall('toggle_auto_launch', { enable: enabled });
                                             setFormData({ ...formData, auto_launch: enabled });
                                             showToast(enabled ? '已启用开机自动启动' : '已禁用开机自动启动', 'success');
                                         } catch (error) {

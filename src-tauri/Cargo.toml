@@ -52,7 +52,7 @@ thiserror = "2.0.17"
 # 反代服务依赖
 axum = "0.7"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 eventsource-stream = "0.2"
 dashmap = "6.1"
 anyhow = "1.0"

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
+import { apiCall } from '../utils/platform';
 import {
     Power,
     Copy,
@@ -132,7 +132,7 @@ export default function ApiProxy() {
 
     const loadConfig = async () => {
         try {
-            const config = await invoke<AppConfig>('load_config');
+            const config = await apiCall<AppConfig>('load_config');
             setAppConfig(config);
         } catch (error) {
             console.error('加载配置失败:', error);
@@ -141,7 +141,7 @@ export default function ApiProxy() {
 
     const loadStatus = async () => {
         try {
-            const s = await invoke<ProxyStatus>('get_proxy_status');
+            const s = await apiCall<ProxyStatus>('get_proxy_status');
             setStatus(s);
         } catch (error) {
             console.error('获取状态失败:', error);
@@ -150,7 +150,7 @@ export default function ApiProxy() {
 
     const saveConfig = async (newConfig: AppConfig) => {
         try {
-            await invoke('save_config', { config: newConfig });
+            await apiCall('save_config', { config: newConfig });
             setAppConfig(newConfig);
         } catch (error) {
             console.error('保存配置失败:', error);
@@ -172,7 +172,7 @@ export default function ApiProxy() {
         }
 
         try {
-            await invoke('update_model_mapping', { config: newConfig });
+            await apiCall('update_model_mapping', { config: newConfig });
             setAppConfig({ ...appConfig, proxy: newConfig });
         } catch (error) {
             console.error('Failed to update mapping:', error);
@@ -190,7 +190,7 @@ export default function ApiProxy() {
         };
 
         try {
-            await invoke('update_model_mapping', { config: newConfig });
+            await apiCall('update_model_mapping', { config: newConfig });
             setAppConfig({ ...appConfig, proxy: newConfig });
         } catch (error) {
             console.error('Failed to reset mapping:', error);
@@ -203,7 +203,7 @@ export default function ApiProxy() {
         delete newCustom[key];
         const newConfig = { ...appConfig.proxy, custom_mapping: newCustom };
         try {
-            await invoke('update_model_mapping', { config: newConfig });
+            await apiCall('update_model_mapping', { config: newConfig });
             setAppConfig({ ...appConfig, proxy: newConfig });
         } catch (error) {
             console.error('Failed to remove custom mapping:', error);
@@ -227,10 +227,10 @@ export default function ApiProxy() {
         setLoading(true);
         try {
             if (status.running) {
-                await invoke('stop_proxy_service');
+                await apiCall('stop_proxy_service');
             } else {
                 // 使用当前的 appConfig.proxy 启动
-                await invoke('start_proxy_service', { config: appConfig.proxy });
+                await apiCall('start_proxy_service', { config: appConfig.proxy });
             }
             await loadStatus();
         } catch (error: any) {
@@ -243,7 +243,7 @@ export default function ApiProxy() {
     const handleGenerateApiKey = async () => {
         if (confirm(t('proxy.dialog.confirm_regenerate'))) {
             try {
-                const newKey = await invoke<string>('generate_api_key');
+                const newKey = await apiCall<string>('generate_api_key');
                 updateProxyConfig({ api_key: newKey });
             } catch (error) {
                 console.error('生成 API Key 失败:', error);
@@ -564,7 +564,7 @@ print(response.text)`;
                                 <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                                     <Layers size={14} /> {t('proxy.router.group_title')}
                                 </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
                                     {/* Claude 4.5 系列 */}
                                     <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 p-3 rounded-xl border border-blue-100 dark:border-blue-800/30 relative overflow-hidden group hover:border-blue-400 transition-all duration-300">
                                         <div className="flex items-center gap-3 mb-3">
@@ -713,6 +713,37 @@ print(response.text)`;
                                             </optgroup>
                                         </select>
                                         <p className="mt-1 text-[9px] text-amber-600">{t('proxy.router.gemini3_only_warning')}</p>
+                                    </div>
+
+                                    {/* Gemini 系列 */}
+                                    <div className="bg-gradient-to-br from-cyan-50 to-teal-50 dark:from-cyan-900/10 dark:to-teal-900/10 p-3 rounded-xl border border-cyan-100 dark:border-cyan-800/30 relative overflow-hidden group hover:border-cyan-400 transition-all duration-300">
+                                        <div className="flex items-center gap-3 mb-3">
+                                            <div className="w-8 h-8 rounded-lg bg-cyan-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/30">
+                                                <Sparkles size={16} />
+                                            </div>
+                                            <div>
+                                                <div className="text-xs font-bold text-gray-900 dark:text-base-content">{t('proxy.router.groups.gemini.name', 'Gemini 系列')}</div>
+                                                <div className="text-[10px] text-gray-500 line-clamp-1">{t('proxy.router.groups.gemini.desc', 'Gemini 1.5, 2.0')}</div>
+                                            </div>
+                                        </div>
+                                        <select
+                                            className="select select-sm select-bordered w-full font-mono text-[11px] bg-white/80 dark:bg-base-100/80 backdrop-blur-sm"
+                                            value={appConfig.proxy.openai_mapping?.["gemini-series"] || ""}
+                                            onChange={(e) => handleMappingUpdate('openai', 'gemini-series', e.target.value)}
+                                        >
+                                            <option value="">gemini-3-flash{t('proxy.router.default_suffix', ' (Default)')}</option>
+                                            <optgroup label="Gemini 3 (推荐)">
+                                                <option value="gemini-3-flash">gemini-3-flash (快速)</option>
+                                                <option value="gemini-3-pro-high">gemini-3-pro-high (高质量)</option>
+                                                <option value="gemini-3-pro-low">gemini-3-pro-low (均衡)</option>
+                                            </optgroup>
+                                            <optgroup label="Gemini 2.5">
+                                                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                                <option value="gemini-2.5-flash-thinking">gemini-2.5-flash-thinking</option>
+                                                <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                                            </optgroup>
+                                        </select>
                                     </div>
                                 </div>
                             </div>

@@ -11,6 +11,7 @@ use super::server::WebAppState;
 use crate::core::models::{Account, AppConfig, ProxyConfig, TokenData};
 use crate::core::services::{AccountService, QuotaService};
 use crate::core::storage::ConfigStorage;
+use crate::core::traits::StorageConfig;
 
 /// API 响应包装
 #[derive(Serialize)]
@@ -236,11 +237,25 @@ pub async fn generate_api_key(State(_state): State<Arc<WebAppState>>) -> Respons
 
 /// 更新模型映射
 pub async fn update_model_mapping(
-    State(_state): State<Arc<WebAppState>>,
-    Json(_config): Json<ProxyConfig>,
+    State(state): State<Arc<WebAppState>>,
+    Json(proxy_config): Json<ProxyConfig>,
 ) -> Response {
-    // TODO: 实现模型映射更新
-    ApiResponse::err("暂未实现").into_response()
+    // 加载现有配置
+    match ConfigStorage::load(&state.storage) {
+        Ok(mut config) => {
+            // 更新模型映射相关字段
+            config.proxy.anthropic_mapping = proxy_config.anthropic_mapping;
+            config.proxy.openai_mapping = proxy_config.openai_mapping;
+            config.proxy.custom_mapping = proxy_config.custom_mapping;
+
+            // 保存配置
+            match ConfigStorage::save(&state.storage, &config) {
+                Ok(()) => ApiResponse::ok(()).into_response(),
+                Err(e) => ApiResponse::err(e).into_response(),
+            }
+        }
+        Err(e) => ApiResponse::err(format!("加载配置失败: {}", e)).into_response(),
+    }
 }
 
 // ===== 健康检查 =====
@@ -252,6 +267,33 @@ pub async fn health_check() -> Response {
         "version": env!("CARGO_PKG_VERSION")
     }))
     .into_response()
+}
+
+// ===== 系统相关 API =====
+
+/// 获取数据目录路径
+pub async fn get_data_dir_path(State(state): State<Arc<WebAppState>>) -> Response {
+    let path = state.storage.data_dir().to_string_lossy().to_string();
+    ApiResponse::ok(path).into_response()
+}
+
+/// 检查更新
+pub async fn check_for_updates() -> Response {
+    // TODO: 实现版本检查逻辑，暂时返回当前版本无更新
+    let current = env!("CARGO_PKG_VERSION");
+    ApiResponse::ok(serde_json::json!({
+        "has_update": false,
+        "latest_version": current,
+        "current_version": current,
+        "download_url": "https://github.com/lbjlaq/Antigravity-Manager/releases"
+    }))
+    .into_response()
+}
+
+/// 清除日志缓存
+pub async fn clear_log_cache() -> Response {
+    // Web 模式下不需要清理本地日志缓存
+    ApiResponse::ok(()).into_response()
 }
 
 // ===== OAuth 登录 API =====

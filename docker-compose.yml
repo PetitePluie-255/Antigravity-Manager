@@ -3,13 +3,23 @@ services:
     build:
       context: .
       network: host
-    network_mode: host
+    container_name: antigravity-manager
+    ports:
+      - "3000:3000"
     volumes:
       - antigravity-data:/data
     environment:
       - PORT=3000
       - DATA_DIR=/data
+      - STATIC_DIR=/app/dist
+      - BIND_ADDRESS=0.0.0.0
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
 volumes:
   antigravity-data:

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// 反代服务配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProxyConfig {
     /// 是否启用反代服务
     pub enabled: bool,
