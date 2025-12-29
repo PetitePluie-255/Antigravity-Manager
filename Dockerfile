@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.4
+
 # Stage 1: Build Frontend
 FROM node:20-slim AS frontend-builder
 WORKDIR /app
@@ -5,14 +7,17 @@ WORKDIR /app
 # Install pnpm
 RUN npm install -g pnpm
 
-# Copy package files
+# Copy package files first (for dependency caching)
 COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Install dependencies (cached if package files unchanged)
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
-# Copy source
-COPY . .
+# Copy source files
+COPY src/ ./src/
+COPY public/ ./public/
+COPY index.html vite.config.ts tsconfig*.json tailwind.config.js postcss.config.js ./
 
 # Build frontend
 RUN pnpm run build
@@ -26,15 +31,28 @@ RUN apt-get update && \
     apt-get install -y pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy Cargo files first for caching
+# Copy Cargo files first for dependency caching
 COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && \
-    mkdir -p src/bin && echo "fn main() {}" > src/bin/server.rs && \
+
+# Create dummy source files for dependency caching
+RUN mkdir -p src/bin && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > src/bin/server.rs && \
+    echo "pub fn lib() {}" > src/lib.rs
+
+# Build dependencies only (cached if Cargo.toml/lock unchanged)
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
     cargo build --release --no-default-features --features web-server 2>/dev/null || true
 
-# Copy source and build
+# Copy actual source code
 COPY src-tauri/ .
-RUN cargo build --release --bin antigravity-server --no-default-features --features web-server
+
+# Build the actual binary (uses cached dependencies)
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --bin antigravity-server --no-default-features --features web-server && \
+    cp target/release/antigravity-server /antigravity-server
 
 # Stage 3: Production
 FROM debian:bookworm-slim
@@ -46,7 +64,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy Rust backend binary
-COPY --from=backend-builder /app/target/release/antigravity-server /usr/local/bin/
+COPY --from=backend-builder /antigravity-server /usr/local/bin/
 
 # Copy frontend static files
 COPY --from=frontend-builder /app/dist ./dist
