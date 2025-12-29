@@ -1,6 +1,6 @@
 [package]
 name = "antigravity_tools"
-version = "3.2.0"
+version = "3.3.2"
 description = "A Tauri App"
 authors = ["you"]
 license = "CC-BY-NC-SA-4.0"
@@ -30,6 +30,7 @@ tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2.4.2", optional = true }
 tauri-plugin-fs = { version = "2.4.4", optional = true }
 tauri-plugin-single-instance = { version = "2.3.6", features = ["deep-link"], optional = true }
+tauri-plugin-autostart = { version = "2.5.1", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1.10", features = ["v4", "serde"] }
@@ -77,6 +78,7 @@ tauri-app = [
     "dep:tauri-plugin-dialog",
     "dep:tauri-plugin-fs",
     "dep:tauri-plugin-single-instance",
+    "dep:tauri-plugin-autostart",
 ]
 # 纯 Web 服务器模式 (无 Tauri 依赖, 含数据库支持)
 web-server = ["dep:sqlx"]

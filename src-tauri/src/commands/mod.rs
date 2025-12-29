@@ -4,6 +4,8 @@ use tauri::Emitter;
 
 // 导出 proxy 命令
 pub mod proxy;
+// 导出 autostart 命令
+pub mod autostart;
 
 /// 列出所有账号
 #[tauri::command]

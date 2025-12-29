@@ -16,6 +16,9 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
     // 复制 body 以便修改
     let mut inner_request = body.clone();
 
+    // 深度清理 [undefined] 字符串 (Cherry Studio 等客户端常见注入)
+    crate::proxy::mappers::common_utils::deep_clean_undefined(&mut inner_request);
+
     // 强制设置 Gemini v1internal 的最大输出 token 数
     if let Some(obj) = inner_request.as_object_mut() {
         let gen_config = obj.entry("generationConfig").or_insert_with(|| json!({}));
@@ -24,15 +27,31 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
         }
     }
 
+    // 提取 tools 列表以进行联网探测 (Gemini 风格可能是嵌套的)
+    let tools_val: Option<Vec<Value>> = inner_request.get("tools").and_then(|t| t.as_array()).map(|arr| {
+        arr.clone()
+    });
+
     // Use shared grounding/config logic
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(original_model, final_model_name);
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(original_model, final_model_name, &tools_val);
     
-    // Clean tool declarations (remove forbidden Schema fields like multipleOf)
+    // Clean tool declarations (remove forbidden Schema fields like multipleOf, and remove redundant search decls)
     if let Some(tools) = inner_request.get_mut("tools") {
         if let Some(tools_arr) = tools.as_array_mut() {
             for tool in tools_arr {
                 if let Some(decls) = tool.get_mut("functionDeclarations") {
                     if let Some(decls_arr) = decls.as_array_mut() {
+                        // 1. 过滤掉联网关键字函数
+                        decls_arr.retain(|decl| {
+                            if let Some(name) = decl.get("name").and_then(|v| v.as_str()) {
+                                if name == "web_search" || name == "google_search" {
+                                    return false;
+                                }
+                            }
+                            true
+                        });
+
+                        // 2. 清洗剩余 Schema
                         for decl in decls_arr {
                             if let Some(params) = decl.get_mut("parameters") {
                                 crate::proxy::common::json_schema::clean_json_schema(params);

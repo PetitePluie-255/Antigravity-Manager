@@ -1,7 +1,5 @@
 use super::models::*;
 use serde_json::Value;
-// use chrono::Utc;
-// use uuid::Uuid;
 
 pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
     // 解包 response 字段
@@ -50,7 +48,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                 });
             }
             
-            // 图片处理 (保持现有逻辑)
+            // 图片处理
             if let Some(img) = part.get("inlineData") {
                 let mime_type = img.get("mimeType").and_then(|v| v.as_str()).unwrap_or("image/png");
                 let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
@@ -61,7 +59,45 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         }
     }
 
-    // 提取 finish_reason (增加更多映射)
+    // 提取并处理联网搜索引文 (Grounding Metadata)
+    if let Some(grounding) = raw.get("candidates")
+        .and_then(|c| c.get(0))
+        .and_then(|cand| cand.get("groundingMetadata")) {
+        
+        let mut grounding_text = String::new();
+        
+        // 1. 处理搜索词
+        if let Some(queries) = grounding.get("webSearchQueries").and_then(|q| q.as_array()) {
+            let query_list: Vec<&str> = queries.iter().filter_map(|v| v.as_str()).collect();
+            if !query_list.is_empty() {
+                grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
+                grounding_text.push_str(&query_list.join(", "));
+            }
+        }
+
+        // 2. 处理来源链接 (Chunks)
+        if let Some(chunks) = grounding.get("groundingChunks").and_then(|c| c.as_array()) {
+            let mut links = Vec::new();
+            for (i, chunk) in chunks.iter().enumerate() {
+                if let Some(web) = chunk.get("web") {
+                    let title = web.get("title").and_then(|v| v.as_str()).unwrap_or("网页来源");
+                    let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
+                    links.push(format!("[{}] [{}]({})", i + 1, title, uri));
+                }
+            }
+            
+            if !links.is_empty() {
+                grounding_text.push_str("\n\n**🌐 来源引文：**\n");
+                grounding_text.push_str(&links.join("\n"));
+            }
+        }
+
+        if !grounding_text.is_empty() {
+            content_out.push_str(&grounding_text);
+        }
+    }
+
+    // 提取 finish_reason
     let finish_reason = raw
         .get("candidates")
         .and_then(|c| c.get(0))
@@ -85,9 +121,10 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
             index: 0,
             message: OpenAIMessage {
                 role: "assistant".to_string(),
-                content: if content_out.is_empty() { None } else { Some(content_out) },
+                content: if content_out.is_empty() { None } else { Some(OpenAIContent::String(content_out)) },
                 tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
                 tool_call_id: None,
+                name: None,
             },
             finish_reason: Some(finish_reason.to_string()),
         }],
@@ -114,7 +151,12 @@ mod tests {
 
         let result = transform_openai_response(&gemini_resp);
         assert_eq!(result.object, "chat.completion");
-        assert_eq!(result.choices[0].message.content, Some("Hello!".to_string()));
+        
+        let content = match result.choices[0].message.content.as_ref().unwrap() {
+            OpenAIContent::String(s) => s,
+            _ => panic!("Expected string content"),
+        };
+        assert_eq!(content, "Hello!");
         assert_eq!(result.choices[0].finish_reason, Some("stop".to_string()));
     }
 }

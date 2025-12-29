@@ -1,3 +1,4 @@
+// 移除冗余的顶层导入，因为这些在代码中已由 full path 或局部导入处理
 use dashmap::DashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -66,6 +67,7 @@ impl ProxyToken {
 pub struct TokenManager {
     tokens: Arc<DashMap<String, ProxyToken>>, // account_id -> ProxyToken
     current_index: Arc<AtomicUsize>,
+    last_used_account: Arc<tokio::sync::Mutex<Option<(String, std::time::Instant)>>>,
     data_dir: PathBuf,
 }
 
@@ -75,6 +77,7 @@ impl TokenManager {
         Self {
             tokens: Arc::new(DashMap::new()),
             current_index: Arc::new(AtomicUsize::new(0)),
+            last_used_account: Arc::new(tokio::sync::Mutex::new(None)),
             data_dir,
         }
     }
@@ -160,7 +163,7 @@ impl TokenManager {
             .get("session_id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| generate_session_id());
+            .unwrap_or_else(generate_session_id);
 
         // 读取配额数据
         let quota: Option<QuotaData> = account
@@ -181,34 +184,70 @@ impl TokenManager {
         }))
     }
 
-    /// 获取当前可用的 Token（轮换机制）
-    /// 参数 `_quota_group` 用于区分 "claude" vs "gemini" 组（暂未完全实现分组逻辑，目前全局轮换）
-    /// 返回 (access_token, project_id)
-    pub async fn get_token(&self, _quota_group: &str) -> Result<(String, String), String> {
+    /// 获取当前可用的 Token（带 60s 时间窗口锁定机制）
+    /// 参数 `quota_group` 用于区分 "claude" vs "gemini" 组
+    /// 参数 `force_rotate` 为 true 时将忽略锁定，强制切换账号
+    /// 返回 (access_token, project_id, email)
+    pub async fn get_token(
+        &self,
+        quota_group: &str,
+        force_rotate: bool,
+    ) -> Result<(String, String, String), String> {
         let total = self.tokens.len();
         if total == 0 {
             return Err("Token pool is empty".to_string());
         }
 
-        // 简单轮换策略 (Round Robin)
-        // TODO: 基于 quota_group 筛选 tokens
-        let idx = self.current_index.fetch_add(1, Ordering::SeqCst) % total;
+        // 1. 检查时间窗口锁定 (60秒内强制复用上一个账号)
+        // 优化策略: 画图请求 (image_gen) 默认不锁定，以最大化并发能力
+        let mut target_token = None;
+        if !force_rotate && quota_group != "image_gen" {
+            let last_used = self.last_used_account.lock().await;
+            if let Some((account_id, last_time)) = &*last_used {
+                if last_time.elapsed().as_secs() < 60 {
+                    if let Some(entry) = self.tokens.get(account_id) {
+                        tracing::info!("60s 时间窗口内，强制复用上一个账号: {}", entry.email);
+                        target_token = Some(entry.value().clone());
+                    }
+                }
+            }
+        }
 
-        // 获取 Token 对象 (Clone to avoid holding lock across await)
-        let mut token = self
-            .tokens
-            .iter()
-            .nth(idx)
-            .map(|entry| entry.value().clone())
-            .ok_or("Failed to retrieve token from pool")?;
+        // 2. 如果没有锁定、锁定失效或强制轮换，则进行轮询记录并更新锁定信息
+        let mut token = if let Some(t) = target_token {
+            t
+        } else {
+            // 简单轮换策略 (Round Robin)
+            let idx = self.current_index.fetch_add(1, Ordering::SeqCst) % total;
+            let selected_token = self
+                .tokens
+                .iter()
+                .nth(idx)
+                .map(|entry| entry.value().clone())
+                .ok_or("Failed to retrieve token from pool")?;
 
-        // 检查 token 是否过期（提前5分钟刷新）
+            // 更新最后使用的账号及时间 (如果是普通对话请求)
+            if quota_group != "image_gen" {
+                let mut last_used = self.last_used_account.lock().await;
+                *last_used = Some((selected_token.account_id.clone(), std::time::Instant::now()));
+            }
+
+            let action_msg = if force_rotate {
+                "强制切换"
+            } else {
+                "切换"
+            };
+            tracing::info!("{}到账号: {}", action_msg, selected_token.email);
+            selected_token
+        };
+
+        // 3. 检查 token 是否过期（提前5分钟刷新）
         let now = chrono::Utc::now().timestamp();
         if now >= token.timestamp - 300 {
             tracing::info!(
                 "账号 {} (Group: {}) 的 token 即将过期，正在刷新...",
                 token.email,
-                _quota_group
+                quota_group
             );
 
             // 调用独立的 OAuth 刷新 (Tauri 和 Web 模式通用)
@@ -265,13 +304,16 @@ impl TokenManager {
             }
         };
 
-        Ok((token.access_token, project_id))
+        Ok((token.access_token, project_id, token.email))
     }
 
     /// 获取配额充足的 Token（配额感知选择）
     /// 参数 `model`: 模型名称，用于判断模型类型 (gemini/claude)
-    /// 返回 (access_token, project_id)
-    pub async fn get_token_with_quota(&self, model: &str) -> Result<(String, String), String> {
+    /// 返回 (access_token, project_id, email)
+    pub async fn get_token_with_quota(
+        &self,
+        model: &str,
+    ) -> Result<(String, String, String), String> {
         let model_type = Self::get_model_type(model);
         let min_quota = 10; // 最低配额阈值 10%
 
@@ -355,7 +397,7 @@ impl TokenManager {
             }
         };
 
-        Ok((token.access_token, project_id))
+        Ok((token.access_token, project_id, token.email))
     }
 
     /// 根据模型名称判断模型类型

@@ -69,67 +69,85 @@ fn flatten_refs(map: &mut serde_json::Map<String, Value>, defs: &serde_json::Map
 fn clean_json_schema_recursive(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            // 1. 移除不支持的字段
-            let fields_to_remove = [
-                "$schema",
-                // "$defs", "definitions", "$ref", // 这些已经在上面处理了
-                "additionalProperties",
-                "format",
-                "default",
-                "uniqueItems",
-                // Claude/JSONSchema extensions not accepted by Gemini
-                "enumCaseInsensitive",
-                "enumNormalizeWhitespace",
-                "minLength",
-                "maxLength",
-                "minimum",
-                "maximum",
-                "exclusiveMinimum",
-                "exclusiveMaximum",
-                "multipleOf",
-                "minItems",
-                "maxItems",
-                "pattern",
-                "const",
-                "minProperties",
-                "maxProperties",
-                "propertyNames",
-                "patternProperties",
-                "contains",
-                "minContains",
-                "maxContains",
-                "if",
-                "then",
-                "else",
-                "not",
-                "anyOf", // Gemini 其实也对此有限制，尽量保留或简化
-                "oneOf",
-                "allOf"
+            // 1. 先递归处理所有子节点，确保嵌套结构被正确清理
+            for v in map.values_mut() {
+                clean_json_schema_recursive(v);
+            }
+
+            // 2. 收集并处理校验字段 (Migration logic: 将约束降级为描述中的 Hint)
+            let mut constraints = Vec::new();
+            
+            // 待迁移的约束黑名单
+            let validation_fields = [
+                ("pattern", "pattern"),
+                ("minLength", "minLen"), ("maxLength", "maxLen"),
+                ("minimum", "min"), ("maximum", "max"),
+                ("minItems", "minItems"), ("maxItems", "maxItems"),
+                ("exclusiveMinimum", "exclMin"), ("exclusiveMaximum", "exclMax"),
+                ("multipleOf", "multipleOf"),
+                ("format", "format"),
             ];
 
-            // 注意：Gemini 对 anyOf/oneOf 支持有限，可能需要进一步简化，
-            // 但目前先只移除明确不支持的元数据关键字
-            for field in fields_to_remove {
-                // 对于 anyOf/oneOf/allOf，我们暂不移除，因为这涉及逻辑结构
-                if field == "anyOf" || field == "oneOf" || field == "allOf" {
-                    continue; 
+            for (field, label) in validation_fields {
+                if let Some(val) = map.remove(field) {
+                    // 仅当值是简单类型时才迁移（避免将对象定义的属性名误删，虽然由层级控制，但通过 Value 类型检查更稳妥）
+                    if val.is_string() || val.is_number() || val.is_boolean() {
+                        constraints.push(format!("{}: {}", label, val));
+                    } else {
+                        // 如果不是预期类型，原样放回（可能是特殊属性定义）
+                        map.insert(field.to_string(), val);
+                    }
                 }
+            }
+
+            // 3. 将约束信息追加到描述
+            if !constraints.is_empty() {
+                let suffix = format!(" [Constraint: {}]", constraints.join(", "));
+                let desc_val = map.entry("description".to_string()).or_insert_with(|| Value::String("".to_string()));
+                if let Value::String(s) = desc_val {
+                    s.push_str(&suffix);
+                }
+            }
+
+            // 4. 彻底物理移除干扰生成的“硬项”黑色名单 (Hard Blacklist)
+            let hard_remove_fields = [
+                "$schema",
+                "additionalProperties",
+                "enumCaseInsensitive",
+                "enumNormalizeWhitespace",
+                "uniqueItems",
+                "default",
+                "const",
+                "examples",
+                // MCP 工具常用但 Gemini 不支持的高级逻辑字段
+                "propertyNames",
+                "anyOf",
+                "oneOf",
+                "allOf",
+                "not",
+                "if", "then", "else",
+                "dependencies",
+                "dependentSchemas",
+                "dependentRequired",
+                "cache_control", // 解决用户提到的 cache_control 触发的 400 错误
+            ];
+            for field in hard_remove_fields {
                 map.remove(field);
             }
 
-            // 2. 处理 type 字段 (Union Types -> Primary Type + Uppercase)
+            // 5. 处理 type 字段 (Gemini 要求单字符串且小写)
             if let Some(type_val) = map.get_mut("type") {
                 match type_val {
                     Value::String(s) => {
-                        *type_val = Value::String(s.to_uppercase());
+                        *type_val = Value::String(s.to_lowercase());
                     }
                     Value::Array(arr) => {
-                        // Handle ["string", "null"] -> select first non-null
-                        let mut selected_type = "STRING".to_string(); // Default fallback
+                        // 联合类型降级：取第一个非 null 类型
+                        let mut selected_type = "string".to_string(); 
                         for item in arr {
                             if let Value::String(s) = item {
                                 if s != "null" {
-                                    selected_type = s.to_uppercase();
+                                    selected_type = s.to_lowercase();
                                     break;
                                 }
                             }
@@ -139,11 +157,6 @@ fn clean_json_schema_recursive(value: &mut Value) {
                     _ => {}
                 }
             }
-
-            // 3. 递归处理所有子节点 (Schema 中可能存在任意嵌套字段)
-            for v in map.values_mut() {
-                clean_json_schema_recursive(v);
-            }
         }
         Value::Array(arr) => {
             for v in arr.iter_mut() {
@@ -151,5 +164,98 @@ fn clean_json_schema_recursive(value: &mut Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_clean_json_schema_draft_2020_12() {
+        let mut schema = json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "minLength": 1,
+                    "format": "city"
+                },
+                // 模拟属性名冲突：pattern 是一个 Object 属性，不应被移除
+                "pattern": {
+                    "type": "object",
+                    "properties": {
+                        "regex": { "type": "string", "pattern": "^[a-z]+$" }
+                    }
+                },
+                "unit": {
+                    "type": ["string", "null"],
+                    "default": "celsius"
+                }
+            },
+            "required": ["location"]
+        });
+
+        clean_json_schema(&mut schema);
+
+        // 1. 验证类型保持小写
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["location"]["type"], "string");
+
+        // 2. 验证标准字段被转换并移动到描述 (Advanced Soft-Remove)
+        assert!(schema["properties"]["location"].get("minLength").is_none());
+        assert!(schema["properties"]["location"]["description"].as_str().unwrap().contains("minLen: 1"));
+
+        // 3. 验证名为 "pattern" 的属性未被误删
+        assert!(schema["properties"].get("pattern").is_some());
+        assert_eq!(schema["properties"]["pattern"]["type"], "object");
+
+        // 4. 验证内部的 pattern 校验字段被正确移除并转为描述
+        assert!(schema["properties"]["pattern"]["properties"]["regex"].get("pattern").is_none());
+        assert!(schema["properties"]["pattern"]["properties"]["regex"]["description"].as_str().unwrap().contains("pattern: ^[a-z]+$"));
+
+        // 5. 验证联合类型被降级为单一类型 (Protobuf 兼容性)
+        assert_eq!(schema["properties"]["unit"]["type"], "string");
+        
+        // 6. 验证元数据字段被移除
+        assert!(schema.get("$schema").is_none());
+    }
+
+    #[test]
+    fn test_type_fallback() {
+        // Test ["string", "null"] -> "string"
+        let mut s1 = json!({"type": ["string", "null"]});
+        clean_json_schema(&mut s1);
+        assert_eq!(s1["type"], "string");
+
+        // Test ["integer", "null"] -> "integer" (and lowercase check if needed, though usually integer)
+        let mut s2 = json!({"type": ["integer", "null"]});
+        clean_json_schema(&mut s2);
+        assert_eq!(s2["type"], "integer");
+    }
+
+    #[test]
+    fn test_flatten_refs() {
+        let mut schema = json!({
+            "$defs": {
+                "Address": {
+                    "type": "object",
+                    "properties": {
+                        "city": { "type": "string" }
+                    }
+                }
+            },
+            "properties": {
+                "home": { "$ref": "#/$defs/Address" }
+            }
+        });
+
+        clean_json_schema(&mut schema);
+
+        // 验证引用被展开且类型转为小写
+        assert_eq!(schema["properties"]["home"]["type"], "object");
+        assert_eq!(schema["properties"]["home"]["properties"]["city"]["type"], "string");
     }
 }

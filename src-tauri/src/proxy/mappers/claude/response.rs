@@ -43,6 +43,13 @@ impl NonStreamingProcessor {
             self.process_part(part);
         }
 
+        // 处理 grounding(web search) -> 转换为 server_tool_use / web_search_tool_result
+        if let Some(candidate) = gemini_response.candidates.as_ref().and_then(|c| c.get(0)) {
+            if let Some(grounding) = &candidate.grounding_metadata {
+                self.process_grounding(grounding);
+            }
+        }
+
         // 刷新剩余内容
         self.flush_thinking();
         self.flush_text();
@@ -52,6 +59,7 @@ impl NonStreamingProcessor {
             self.content_blocks.push(ContentBlock::Thinking {
                 thinking: String::new(),
                 signature: Some(signature),
+                cache_control: None,
             });
         }
 
@@ -73,6 +81,7 @@ impl NonStreamingProcessor {
                 self.content_blocks.push(ContentBlock::Thinking {
                     thinking: String::new(),
                     signature: Some(trailing_sig),
+                    cache_control: None,
                 });
             }
 
@@ -92,6 +101,7 @@ impl NonStreamingProcessor {
                 name: fc.name.clone(),
                 input: fc.args.clone().unwrap_or(serde_json::json!({})),
                 signature: None,
+                cache_control: None,
             };
 
             // 只使用 FC 自己的签名
@@ -115,6 +125,7 @@ impl NonStreamingProcessor {
                     self.content_blocks.push(ContentBlock::Thinking {
                         thinking: String::new(),
                         signature: Some(trailing_sig),
+                        cache_control: None,
                     });
                 }
 
@@ -140,6 +151,7 @@ impl NonStreamingProcessor {
                     self.content_blocks.push(ContentBlock::Thinking {
                         thinking: String::new(),
                         signature: Some(trailing_sig),
+                        cache_control: None,
                     });
                 }
 
@@ -151,6 +163,7 @@ impl NonStreamingProcessor {
                     self.content_blocks.push(ContentBlock::Thinking {
                         thinking: String::new(),
                         signature: Some(sig),
+                        cache_control: None,
                     });
                 }
             }
@@ -159,7 +172,7 @@ impl NonStreamingProcessor {
         // 3. InlineData (Image) 处理
         if let Some(img) = &part.inline_data {
             self.flush_thinking();
-            
+
             let mime_type = &img.mime_type;
             let data = &img.data;
             if !data.is_empty() {
@@ -167,6 +180,44 @@ impl NonStreamingProcessor {
                 self.text_builder.push_str(&markdown_img);
                 self.flush_text();
             }
+        }
+    }
+
+    /// 处理 Grounding 元数据 (Web Search 结果)
+    fn process_grounding(&mut self, grounding: &GroundingMetadata) {
+        let mut grounding_text = String::new();
+
+        // 1. 处理搜索词
+        if let Some(queries) = &grounding.web_search_queries {
+            if !queries.is_empty() {
+                grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
+                grounding_text.push_str(&queries.join(", "));
+            }
+        }
+
+        // 2. 处理来源链接 (Chunks)
+        if let Some(chunks) = &grounding.grounding_chunks {
+            let mut links = Vec::new();
+            for (i, chunk) in chunks.iter().enumerate() {
+                if let Some(web) = &chunk.web {
+                    let title = web.title.as_deref().unwrap_or("网页来源");
+                    let uri = web.uri.as_deref().unwrap_or("#");
+                    links.push(format!("[{}] [{}]({})", i + 1, title, uri));
+                }
+            }
+
+            if !links.is_empty() {
+                grounding_text.push_str("\n\n**🌐 来源引文：**\n");
+                grounding_text.push_str(&links.join("\n"));
+            }
+        }
+
+        if !grounding_text.is_empty() {
+            // 在常规内容前后刷新并插入文本
+            self.flush_thinking();
+            self.flush_text();
+            self.text_builder.push_str(&grounding_text);
+            self.flush_text();
         }
     }
 
@@ -192,7 +243,11 @@ impl NonStreamingProcessor {
         let thinking = self.thinking_builder.clone();
         let signature = self.thinking_signature.take();
 
-        self.content_blocks.push(ContentBlock::Thinking { thinking, signature });
+        self.content_blocks.push(ContentBlock::Thinking {
+            thinking,
+            signature,
+            cache_control: None,
+        });
         self.thinking_builder.clear();
     }
 
@@ -219,19 +274,16 @@ impl NonStreamingProcessor {
             .unwrap_or(Usage {
                 input_tokens: 0,
                 output_tokens: 0,
+                server_tool_use: None,
             });
 
         ClaudeResponse {
-            id: gemini_response
-                .response_id
-                .clone()
-                .unwrap_or_else(|| format!("msg_{}", crate::proxy::common::utils::generate_random_id())),
+            id: gemini_response.response_id.clone().unwrap_or_else(|| {
+                format!("msg_{}", crate::proxy::common::utils::generate_random_id())
+            }),
             type_: "message".to_string(),
             role: "assistant".to_string(),
-            model: gemini_response
-                .model_version
-                .clone()
-                .unwrap_or_default(),
+            model: gemini_response.model_version.clone().unwrap_or_default(),
             content: self.content_blocks.clone(),
             stop_reason: stop_reason.to_string(),
             stop_sequence: None,
@@ -267,6 +319,7 @@ mod tests {
                 }),
                 finish_reason: Some("STOP".to_string()),
                 index: Some(0),
+                grounding_metadata: None,
             }]),
             usage_metadata: Some(UsageMetadata {
                 prompt_token_count: Some(10),
@@ -320,6 +373,7 @@ mod tests {
                 }),
                 finish_reason: Some("STOP".to_string()),
                 index: Some(0),
+                grounding_metadata: None,
             }]),
             usage_metadata: None,
             model_version: Some("gemini-2.5-pro".to_string()),
@@ -333,7 +387,11 @@ mod tests {
         assert_eq!(claude_resp.content.len(), 2);
 
         match &claude_resp.content[0] {
-            ContentBlock::Thinking { thinking, signature } => {
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+                ..
+            } => {
                 assert_eq!(thinking, "Let me think...");
                 assert_eq!(signature.as_deref(), Some("sig123"));
             }

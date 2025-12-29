@@ -7,12 +7,22 @@ interface PaginationProps {
     onPageChange: (page: number) => void;
     totalItems: number;
     itemsPerPage: number;
+    onPageSizeChange?: (pageSize: number) => void;  // 新增:分页大小变更回调
+    pageSizeOptions?: number[];  // 新增:可选的分页大小选项
 }
 
-function Pagination({ currentPage, totalPages, onPageChange, totalItems, itemsPerPage }: PaginationProps) {
+function Pagination({
+    currentPage,
+    totalPages,
+    onPageChange,
+    totalItems,
+    itemsPerPage,
+    onPageSizeChange,
+    pageSizeOptions = [10, 20, 50, 100]
+}: PaginationProps) {
     const { t } = useTranslation();
 
-    if (totalPages <= 1) return null;
+    if (totalPages <= 1 && !onPageSizeChange) return null;
 
     // 计算显示的页码范围 (最多显示 5 个页码)
     let startPage = Math.max(1, currentPage - 2);
@@ -58,10 +68,26 @@ function Pagination({ currentPage, totalPages, onPageChange, totalItems, itemsPe
 
             {/* Desktop View */}
             <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-                <div>
+                <div className="flex items-center gap-4">
                     <p className="text-sm text-gray-700 dark:text-gray-400">
                         {t('common.pagination_info', { start: startIndex, end: endIndex, total: totalItems })}
                     </p>
+
+                    {/* 分页大小选择器 */}
+                    {onPageSizeChange && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600 dark:text-gray-400">{t('common.per_page')}</span>
+                            <select
+                                value={itemsPerPage}
+                                onChange={(e) => onPageSizeChange(parseInt(e.target.value))}
+                                className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-base-100 text-gray-900 dark:text-base-content focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                {pageSizeOptions.map(size => (
+                                    <option key={size} value={size}>{size} {t('common.items')}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                 </div>
                 <div>
                     <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">

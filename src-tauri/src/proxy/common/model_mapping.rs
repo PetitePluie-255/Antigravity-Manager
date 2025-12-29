@@ -124,6 +124,19 @@ pub fn resolve_model_route(
         }
     }
 
+    // GPT-5 系列 (gpt-5, gpt-5.1, gpt-5.2 等)
+    if lower_model.starts_with("gpt-5") {
+        // 优先使用 gpt-5-series 映射，如果没有则使用 gpt-4-series
+        if let Some(target) = openai_mapping.get("gpt-5-series") {
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-5 系列映射: {} -> {}", original_model, target));
+            return target.clone();
+        }
+        if let Some(target) = openai_mapping.get("gpt-4-series") {
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4 系列映射 (GPT-5 fallback): {} -> {}", original_model, target));
+            return target.clone();
+        }
+    }
+
     // 3. 检查家族分组映射 (Anthropic 系)
     if lower_model.starts_with("claude-") {
         let family_key = if lower_model.contains("4-5") || lower_model.contains("4.5") {

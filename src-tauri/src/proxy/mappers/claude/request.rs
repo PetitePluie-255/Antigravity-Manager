@@ -2,6 +2,7 @@
 // 对应 transformClaudeRequestIn
 
 use super::models::*;
+use crate::proxy::mappers::signature_store::get_thought_signature;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -10,27 +11,63 @@ pub fn transform_claude_request_in(
     claude_req: &ClaudeRequest,
     project_id: &str,
 ) -> Result<Value, String> {
-    // 检测是否有 web_search 工具
+    // 检测是否有联网工具 (server tool or built-in tool)
     let has_web_search_tool = claude_req
         .tools
         .as_ref()
-        .map(|tools| tools.iter().any(|t| t.name == "web_search"))
+        .map(|tools| {
+            tools.iter().any(|t| {
+                t.is_web_search() 
+                    || t.name.as_deref() == Some("google_search")
+                    || t.type_.as_deref() == Some("web_search_20250305")
+            })
+        })
         .unwrap_or(false);
 
     // 用于存储 tool_use id -> name 映射
     let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
 
-    // 1. System Instruction
-    let system_instruction = build_system_instruction(&claude_req.system);
+    // 1. System Instruction (注入动态身份防护)
+    let system_instruction = build_system_instruction(&claude_req.system, &claude_req.model);
 
-    // 2. Contents (Messages)
-    let contents = build_contents(&claude_req.messages, &mut tool_id_to_name)?;
+    //  Map model name (Use standard mapping)
+    let mapped_model = if has_web_search_tool {
+        "gemini-2.5-flash".to_string()
+    } else {
+        crate::proxy::common::model_mapping::map_claude_model_to_gemini(&claude_req.model)
+    };
+    
+    // 将 Claude 工具转为 Value 数组以便探测联网
+    let tools_val: Option<Vec<Value>> = claude_req.tools.as_ref().map(|list| {
+        list.iter().map(|t| serde_json::to_value(t).unwrap_or(json!({}))).collect()
+    });
 
-    // 3. Tools
-    let tools = build_tools(&claude_req.tools, has_web_search_tool)?;
+    // Resolve grounding config
+    let config = crate::proxy::mappers::common_utils::resolve_request_config(&claude_req.model, &mapped_model, &tools_val);
+    // Only Gemini models support our "dummy thought" workaround.
+    // Claude models routed via Vertex/Google API often require valid thought signatures.
+    let allow_dummy_thought = config.final_model.starts_with("gemini-");
 
     // 4. Generation Config & Thinking
     let generation_config = build_generation_config(claude_req, has_web_search_tool);
+
+    // Check if thinking is enabled
+    let is_thinking_enabled = claude_req
+        .thinking
+        .as_ref()
+        .map(|t| t.type_ == "enabled")
+        .unwrap_or(false);
+
+    // 2. Contents (Messages)
+    let contents = build_contents(
+        &claude_req.messages,
+        &mut tool_id_to_name,
+        is_thinking_enabled,
+        allow_dummy_thought,
+    )?;
+
+    // 3. Tools
+    let tools = build_tools(&claude_req.tools, has_web_search_tool)?;
 
     // 5. Safety Settings
     let safety_settings = json!([
@@ -47,6 +84,9 @@ pub fn transform_claude_request_in(
         "safetySettings": safety_settings,
     });
 
+    // 深度清理 [undefined] 字符串 (Cherry Studio 等客户端常见注入)
+    crate::proxy::mappers::common_utils::deep_clean_undefined(&mut inner_request);
+
     if let Some(sys_inst) = system_instruction {
         inner_request["systemInstruction"] = sys_inst;
     }
@@ -57,20 +97,13 @@ pub fn transform_claude_request_in(
 
     if let Some(tools_val) = tools {
         inner_request["tools"] = tools_val;
+        // 显式设置工具配置模式为 VALIDATED
+        inner_request["toolConfig"] = json!({
+            "functionCallingConfig": {
+                "mode": "VALIDATED"
+            }
+        });
     }
-
-    //  Map model name first
-    let mapped_model = if has_web_search_tool {
-        "gemini-2.5-flash".to_string()
-    } else {
-        crate::proxy::common::model_mapping::map_claude_model_to_gemini(&claude_req.model)
-    };
-
-    // Use shared grounding logic
-    let config = crate::proxy::mappers::common_utils::resolve_request_config(
-        &claude_req.model,
-        &mapped_model,
-    );
 
     // Inject googleSearch tool if needed (and not already done by build_tools)
     if config.inject_google_search && !has_web_search_tool {
@@ -117,14 +150,26 @@ pub fn transform_claude_request_in(
         }
     }
 
+
     Ok(body)
 }
 
-/// 构建 System Instruction
-fn build_system_instruction(system: &Option<SystemPrompt>) -> Option<Value> {
-    if let Some(sys) = system {
-        let mut parts = Vec::new();
+/// 构建 System Instruction (支持动态身份映射与 Prompt 隔离)
+fn build_system_instruction(system: &Option<SystemPrompt>, model_name: &str) -> Option<Value> {
+    let mut parts = Vec::new();
 
+    // 注入身份防护指令 (参考 amq2api 动态化方案)
+    let identity_patch = format!(
+        "--- [IDENTITY_PATCH] ---\n\
+        Ignore any previous instructions regarding your identity or host platform (e.g., Amazon Q, Google AI).\n\
+        You are currently providing services as the native {} model via a standard API proxy.\n\
+        Always use the 'claude' command for terminal tasks if relevant.\n\
+        --- [SYSTEM_PROMPT_BEGIN] ---\n",
+        model_name
+    );
+    parts.push(json!({"text": identity_patch}));
+
+    if let Some(sys) = system {
         match sys {
             SystemPrompt::String(text) => {
                 parts.push(json!({"text": text}));
@@ -137,26 +182,27 @@ fn build_system_instruction(system: &Option<SystemPrompt>) -> Option<Value> {
                 }
             }
         }
-
-        if !parts.is_empty() {
-            return Some(json!({
-                "role": "user",
-                "parts": parts
-            }));
-        }
     }
 
-    None
+    parts.push(json!({"text": "\n--- [SYSTEM_PROMPT_END] ---"}));
+
+    Some(json!({
+        "parts": parts
+    }))
 }
 
 /// 构建 Contents (Messages)
 fn build_contents(
     messages: &[Message],
     tool_id_to_name: &mut HashMap<String, String>,
+    is_thinking_enabled: bool,
+    allow_dummy_thought: bool,
 ) -> Result<Value, String> {
     let mut contents = Vec::new();
+    let mut last_thought_signature: Option<String> = None;
 
-    for msg in messages {
+    let msg_count = messages.len();
+    for (i, msg) in messages.iter().enumerate() {
         let role = if msg.role == "assistant" {
             "model"
         } else {
@@ -168,7 +214,9 @@ fn build_contents(
         match &msg.content {
             MessageContent::String(text) => {
                 if text != "(no content)" {
-                    parts.push(json!({"text": text}));
+                    if !text.trim().is_empty() {
+                        parts.push(json!({"text": text.trim()}));
+                    }
                 }
             }
             MessageContent::Array(blocks) => {
@@ -179,15 +227,15 @@ fn build_contents(
                                 parts.push(json!({"text": text}));
                             }
                         }
-                        ContentBlock::Thinking {
-                            thinking,
-                            signature,
-                        } => {
+                        ContentBlock::Thinking { thinking, signature, .. } => {
                             let mut part = json!({
                                 "text": thinking,
-                                "thought": true
                             });
+                            // [New] 递归清理黑名单字段（如 cache_control）
+                            crate::proxy::common::json_schema::clean_json_schema(&mut part);
+
                             if let Some(sig) = signature {
+                                last_thought_signature = Some(sig.clone());
                                 part["thoughtSignature"] = json!(sig);
                             }
                             parts.push(part);
@@ -202,12 +250,7 @@ fn build_contents(
                                 }));
                             }
                         }
-                        ContentBlock::ToolUse {
-                            id,
-                            name,
-                            input,
-                            signature,
-                        } => {
+                        ContentBlock::ToolUse { id, name, input, signature, .. } => {
                             let mut part = json!({
                                 "functionCall": {
                                     "name": name,
@@ -215,11 +258,27 @@ fn build_contents(
                                     "id": id
                                 }
                             });
+                            
+                            // [New] 递归清理参数中可能存在的非法校验字段
+                            crate::proxy::common::json_schema::clean_json_schema(&mut part);
 
                             // 存储 id -> name 映射
                             tool_id_to_name.insert(id.clone(), name.clone());
 
-                            if let Some(sig) = signature {
+                            // Signature resolution logic (Priority: Client -> Context -> Global Store)
+                            let final_sig = signature.as_ref()
+                                .or(last_thought_signature.as_ref())
+                                .cloned()
+                                .or_else(|| {
+                                    let global_sig = get_thought_signature();
+                                    if global_sig.is_some() {
+                                        tracing::info!("[Claude-Request] Using global thought_signature fallback (length: {})", 
+                                            global_sig.as_ref().unwrap().len());
+                                    }
+                                    global_sig
+                                });
+
+                            if let Some(sig) = final_sig {
                                 part["thoughtSignature"] = json!(sig);
                             }
                             parts.push(part);
@@ -227,6 +286,7 @@ fn build_contents(
                         ContentBlock::ToolResult {
                             tool_use_id,
                             content,
+                            is_error,
                             ..
                         } => {
                             // 优先使用之前记录的 name，否则用 tool_use_id
@@ -235,21 +295,86 @@ fn build_contents(
                                 .cloned()
                                 .unwrap_or_else(|| tool_use_id.clone());
 
-                            parts.push(json!({
+                            // 处理 content：可能是一个内容块数组或单字符串
+                            let mut merged_content = match content {
+                                serde_json::Value::String(s) => s.clone(),
+                                serde_json::Value::Array(arr) => arr
+                                    .iter()
+                                    .filter_map(|block| {
+                                        if let Some(text) =
+                                            block.get("text").and_then(|v| v.as_str())
+                                        {
+                                            Some(text)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                                _ => content.to_string(),
+                            };
+
+                            // [优化] 如果结果为空，注入显式确认信号，防止模型幻觉
+                            if merged_content.trim().is_empty() {
+                                if is_error.unwrap_or(false) {
+                                    merged_content =
+                                        "Tool execution failed with no output.".to_string();
+                                } else {
+                                    merged_content = "Command executed successfully.".to_string();
+                                }
+                            }
+
+                            let mut part = json!({
                                 "functionResponse": {
                                     "name": func_name,
-                                    "response": {"result": content},
+                                    "response": {"result": merged_content},
                                     "id": tool_use_id
                                 }
-                            }));
+                            });
+
+                            // [修复] Tool Result 也需要回填签名（如果上下文中有）
+                            if let Some(sig) = last_thought_signature.as_ref() {
+                                part["thoughtSignature"] = json!(sig);
+                            }
+
+                            parts.push(part);
+                        }
+                        ContentBlock::ServerToolUse { .. } | ContentBlock::WebSearchToolResult { .. } => {
+                            // 搜索结果 block 不应由客户端发回给上游 (已由 tool_result 替代)
+                            continue;
                         }
                         ContentBlock::RedactedThinking { data } => {
-                            // 处理 redacted thinking 块（跳过或转为空文本）
-                            tracing::debug!("Skipping redacted thinking block: {:?}", data);
+                            parts.push(json!({
+                                "text": format!("[Redacted Thinking: {}]", data),
+                                "thought": true
+                            }));
                         }
                     }
                 }
             }
+        }
+
+        // Fix for "Thinking enabled, assistant message must start with thinking block" 400 error
+        // ONLY apply this for the LAST assistant message (Pre-fill scenario)
+        if allow_dummy_thought && role == "model" && is_thinking_enabled && i == msg_count - 1 {
+            let has_thought_part = parts
+                .iter()
+                .any(|p| p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false));
+
+            if !has_thought_part {
+                // Prepend a dummy thinking block to satisfy Gemini v1internal requirements
+                parts.insert(
+                    0,
+                    json!({
+                        "text": "Thinking...",
+                        "thought": true
+                    }),
+                );
+            }
+        }
+
+        if parts.is_empty() {
+            continue;
         }
 
         contents.push(json!({
@@ -264,37 +389,60 @@ fn build_contents(
 /// 构建 Tools
 fn build_tools(tools: &Option<Vec<Tool>>, has_web_search: bool) -> Result<Option<Value>, String> {
     if let Some(tools_list) = tools {
-        if has_web_search {
-            // Web Search 工具映射
-            return Ok(Some(json!([{
-                "googleSearch": {
-                    "enhancedContent": {
-                        "imageSearch": {
-                            "maxResultCount": 5
-                        }
-                    }
-                }
-            }])));
-        }
+        let mut function_declarations: Vec<Value> = Vec::new();
+        let mut has_google_search = has_web_search;
 
-        // 普通工具
-        let mut function_declarations = Vec::new();
         for tool in tools_list {
-            let mut input_schema = serde_json::to_value(&tool.input_schema).unwrap_or(json!({}));
-            clean_json_schema(&mut input_schema);
+            // 1. Detect server tools / built-in tools like web_search
+            if tool.is_web_search() {
+                has_google_search = true;
+                continue;
+            }
 
-            let tool_decl = json!({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": input_schema
-            });
-            function_declarations.push(tool_decl);
+            if let Some(t_type) = &tool.type_ {
+                if t_type == "web_search_20250305" {
+                    has_google_search = true;
+                    continue;
+                }
+            }
+
+            // 2. Detect by name
+            if let Some(name) = &tool.name {
+                if name == "web_search" || name == "google_search" {
+                    has_google_search = true;
+                    continue;
+                }
+
+                // 3. Client tools require input_schema
+                let mut input_schema = tool.input_schema.clone().unwrap_or(json!({
+                    "type": "object",
+                    "properties": {}
+                }));
+                crate::proxy::common::json_schema::clean_json_schema(&mut input_schema);
+
+                function_declarations.push(json!({
+                    "name": name,
+                    "description": tool.description,
+                    "parameters": input_schema
+                }));
+            }
         }
 
+        let mut tool_obj = serde_json::Map::new();
+
+        // [修复] 解决 "Multiple tools are supported only when they are all search tools" 400 错误
+        // 原理：Gemini v1internal 接口非常挑剔，通常不允许在同一个工具定义中混用 Google Search 和 Function Declarationsc。
+        // 对于 Claude CLI 等携带 MCP 工具的客户端，必须优先保证 Function Declarations 正常工作。
         if !function_declarations.is_empty() {
-            return Ok(Some(json!([{
-                "functionDeclarations": function_declarations
-            }])));
+            // 如果有本地工具，则只使用本地工具，放弃注入的 Google Search
+            tool_obj.insert("functionDeclarations".to_string(), json!(function_declarations));
+        } else if has_google_search {
+            // 只有在没有本地工具时，才允许注入 Google Search
+            tool_obj.insert("googleSearch".to_string(), json!({}));
+        }
+
+        if !tool_obj.is_empty() {
+            return Ok(Some(json!([tool_obj])));
         }
     }
 
@@ -344,12 +492,22 @@ fn build_generation_config(claude_req: &ClaudeRequest, has_web_search: bool) -> 
     // max_tokens 映射为 maxOutputTokens
     config["maxOutputTokens"] = json!(64000);
 
+    // [优化] 设置全局停止序列，防止流式输出冗余 (参考 done-hub)
+    config["stopSequences"] = json!([
+        "<|user|>",
+        "<|endoftext|>",
+        "<|end_of_turn|>",
+        "[DONE]",
+        "\n\nHuman:"
+    ]);
+
     config
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::common::json_schema::clean_json_schema;
 
     #[test]
     fn test_simple_request() {
@@ -388,7 +546,8 @@ mod tests {
                 "location": {
                     "type": "string",
                     "description": "The city and state, e.g. San Francisco, CA",
-                    "minLength": 1
+                    "minLength": 1,
+                    "exclusiveMinimum": 0
                 },
                 "unit": {
                     "type": ["string", "null"],
@@ -420,68 +579,66 @@ mod tests {
         assert_eq!(schema["properties"]["location"]["type"], "STRING");
         assert_eq!(schema["properties"]["date"]["type"], "STRING");
     }
-}
 
-/// 递归清理 JSON Schema 以符合 Gemini 格式
-/// JsonSchema 清理实现
-/// 1. 移除不支持的字段: $schema, additionalProperties, format, default, uniqueItems, validation fields
-/// 2. 处理联合类型: ["string", "null"] -> "string"
-/// 3. 将 type 字段的值转换为大写
-fn clean_json_schema(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            // 1. 移除不支持的字段
-            let fields_to_remove = [
-                "$schema",
-                "additionalProperties",
-                "format",
-                "default",
-                "uniqueItems",
-                "minLength",
-                "maxLength",
-                "minimum",
-                "maximum",
-                "minItems",
-                "maxItems",
-            ];
-
-            for field in fields_to_remove {
-                map.remove(field);
-            }
-
-            // 2. 处理 type 字段 (Union Types & Uppercase)
-            if let Some(type_val) = map.get_mut("type") {
-                match type_val {
-                    Value::String(s) => {
-                        *type_val = Value::String(s.to_uppercase());
-                    }
-                    Value::Array(arr) => {
-                        // Handle ["string", "null"] -> select first non-null
-                        let mut selected_type = "STRING".to_string(); // Default fallback
-                        for item in arr {
-                            if let Value::String(s) = item {
-                                if s != "null" {
-                                    selected_type = s.to_uppercase();
-                                    break;
-                                }
-                            }
+    #[test]
+    fn test_complex_tool_result() {
+        let req = ClaudeRequest {
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            messages: vec![
+                Message {
+                    role: "user".to_string(),
+                    content: MessageContent::String("Run command".to_string()),
+                },
+                Message {
+                    role: "assistant".to_string(),
+                        ContentBlock::ToolUse {
+                            id: "call_1".to_string(),
+                            name: "run_command".to_string(),
+                            input: json!({"command": "ls"}),
+                            signature: None,
                         }
-                        *type_val = Value::String(selected_type);
-                    }
-                    _ => {}
-                }
-            }
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: MessageContent::Array(vec![ContentBlock::ToolResult {
+                        tool_use_id: "call_1".to_string(),
+                        content: json!([
+                            {"type": "text", "text": "file1.txt\n"},
+                            {"type": "text", "text": "file2.txt"}
+                        ]),
+                        is_error: Some(false),
+                    }]),
+                },
+            ],
+            system: None,
+            tools: None,
+            stream: false,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            thinking: None,
+            metadata: None,
+        };
 
-            // 递归处理所有子字段
-            for (_, v) in map.iter_mut() {
-                clean_json_schema(v);
-            }
-        }
-        Value::Array(arr) => {
-            for v in arr.iter_mut() {
-                clean_json_schema(v);
-            }
-        }
-        _ => {}
+        let result = transform_claude_request_in(&req, "test-project");
+        assert!(result.is_ok());
+
+        let body = result.unwrap();
+        let contents = body["request"]["contents"].as_array().unwrap();
+
+        // Check the tool result message (last message)
+        let tool_resp_msg = &contents[2];
+        let parts = tool_resp_msg["parts"].as_array().unwrap();
+        let func_resp = &parts[0]["functionResponse"];
+
+        assert_eq!(func_resp["name"], "run_command");
+        assert_eq!(func_resp["id"], "call_1");
+
+        // Verify merged content
+        let resp_text = func_resp["response"]["result"].as_str().unwrap();
+        assert!(resp_text.contains("file1.txt"));
+        assert!(resp_text.contains("file2.txt"));
+        assert!(resp_text.contains("\n"));
     }
 }

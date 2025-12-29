@@ -23,6 +23,8 @@
         "prev_page": "上一页",
         "next_page": "下一页",
         "pagination_info": "显示第 {{start}} 到 {{end}} 条，共 {{total}} 条",
+        "per_page": "每页",
+        "items": "条",
         "accounts": "个账号"
     },
     "nav": {
@@ -173,7 +175,11 @@
             "theme": "主题",
             "theme_light": "浅色",
             "theme_dark": "深色",
-            "theme_system": "跟随系统"
+            "theme_system": "跟随系统",
+            "auto_launch": "开机自动启动",
+            "auto_launch_enabled": "启用",
+            "auto_launch_disabled": "禁用",
+            "auto_launch_desc": "系统启动时自动运行 Antigravity Tools"
         },
         "account": {
             "title": "账号设置",
@@ -199,6 +205,9 @@
             "antigravity_path_select": "选择反重力程序可执行文件",
             "antigravity_path_detected": "已更新探测到的路径",
             "detect_btn": "探测",
+            "accounts_page_size": "账号列表分页大小",
+            "page_size_auto": "自动计算 (推荐)",
+            "page_size_desc": "设置每页显示的账号数量。选择自动计算将根据窗口大小动态调整。",
             "logs_title": "日志维护",
             "logs_desc": "清理应用产生的日志缓存文件，不会影响账号数据。",
             "clear_logs": "清理日志缓存",
@@ -250,6 +259,11 @@
             "port": "监听端口",
             "port_hint": "默认 8045，修改端口需重启服务",
             "auto_start": "跟随应用自动启动",
+            "allow_lan_access": "允许局域网访问",
+            "allow_lan_access_hint_enabled": "🌐 监听 0.0.0.0，局域网设备可访问",
+            "allow_lan_access_hint_disabled": "🔒 仅监听 127.0.0.1，仅本机可访问（隐私优先）",
+            "allow_lan_access_warning": "⚠️ 开启后局域网内其他设备可访问，请确保 API 密钥安全",
+            "allow_lan_access_restart_hint": "ℹ️ 需要重启服务后生效",
             "api_key": "API 密钥",
             "btn_regenerate": "重新生成密钥",
             "btn_copy": "复制",
@@ -336,6 +350,10 @@
                 "gpt_4o": {
                     "name": "GPT-4o / 3.5 系列",
                     "desc": "GPT-4o, Mini, 3.5 Turbo"
+                },
+                "gpt_5": {
+                    "name": "GPT-5 系列",
+                    "desc": "GPT-5.1, GPT-5.2 xhigh"
                 }
             },
             "expert_title": "专家精确映射 (Expert Custom Routing)",
@@ -344,7 +362,9 @@
             "reset_mapping": "重置映射",
             "add_mapping": "添加映射 (Add Mapping)",
             "current_list": "当前映射列表 (Custom List)",
-            "no_custom_mapping": "暂无自定义精确映射"
+            "no_custom_mapping": "暂无自定义精确映射",
+            "gemini3_only_warning": "⚠️ 仅支持 Gemini 3 系列",
+            "default_suffix": "（默认）"
         },
         "examples": {
             "title": "使用示例"

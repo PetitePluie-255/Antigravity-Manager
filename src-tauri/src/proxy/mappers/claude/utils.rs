@@ -12,6 +12,7 @@ pub fn to_claude_usage(usage_metadata: &super::models::UsageMetadata) -> super::
     super::models::Usage {
         input_tokens: usage_metadata.prompt_token_count.unwrap_or(0),
         output_tokens: usage_metadata.candidates_token_count.unwrap_or(0),
+        server_tool_use: None,
     }
 }
 

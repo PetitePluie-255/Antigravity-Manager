@@ -5,6 +5,7 @@ pub mod claude;
 pub mod common_utils;
 pub mod gemini;
 pub mod openai;
+pub mod signature_store;
 
 #[allow(ambiguous_glob_reexports)]
 pub use claude::*;

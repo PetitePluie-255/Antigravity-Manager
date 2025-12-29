@@ -3,6 +3,7 @@
 
 use super::models::*;
 use super::utils::to_claude_usage;
+use crate::proxy::mappers::signature_store::store_thought_signature;
 use bytes::Bytes;
 use serde_json::json;
 
@@ -43,12 +44,14 @@ impl SignatureManager {
 /// 流式状态机
 pub struct StreamingState {
     block_type: BlockType,
-    block_index: usize,
+    pub block_index: usize,
     pub message_start_sent: bool,
     pub message_stop_sent: bool,
     used_tool: bool,
     signatures: SignatureManager,
     trailing_signature: Option<String>,
+    pub web_search_query: Option<String>,
+    pub grounding_chunks: Option<Vec<serde_json::Value>>,
 }
 
 impl StreamingState {
@@ -61,6 +64,8 @@ impl StreamingState {
             used_tool: false,
             signatures: SignatureManager::new(),
             trailing_signature: None,
+            web_search_query: None,
+            grounding_chunks: None,
         }
     }
 
@@ -116,7 +121,11 @@ impl StreamingState {
     }
 
     /// 开始新的内容块
-    pub fn start_block(&mut self, block_type: BlockType, content_block: serde_json::Value) -> Vec<Bytes> {
+    pub fn start_block(
+        &mut self,
+        block_type: BlockType,
+        content_block: serde_json::Value,
+    ) -> Vec<Bytes> {
         let mut chunks = Vec::new();
         if self.block_type != BlockType::None {
             chunks.extend(self.end_block());
@@ -216,6 +225,48 @@ impl StreamingState {
             self.block_index += 1;
         }
 
+        // 处理 grounding(web search) -> 转换为 Markdown 文本块
+        if self.web_search_query.is_some() || self.grounding_chunks.is_some() {
+            let mut grounding_text = String::new();
+            
+            // 1. 处理搜索词
+            if let Some(query) = &self.web_search_query {
+                if !query.is_empty() {
+                    grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
+                    grounding_text.push_str(query);
+                }
+            }
+
+            // 2. 处理来源链接
+            if let Some(chunks) = &self.grounding_chunks {
+                let mut links = Vec::new();
+                for (i, chunk) in chunks.iter().enumerate() {
+                    if let Some(web) = chunk.get("web") {
+                        let title = web.get("title").and_then(|v| v.as_str()).unwrap_or("网页来源");
+                        let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
+                        links.push(format!("[{}] [{}]({})", i + 1, title, uri));
+                    }
+                }
+                
+                if !links.is_empty() {
+                    grounding_text.push_str("\n\n**🌐 来源引文：**\n");
+                    grounding_text.push_str(&links.join("\n"));
+                }
+            }
+
+            if !grounding_text.is_empty() {
+                // 发送一个新的 text 块
+                chunks.push(self.emit("content_block_start", json!({
+                    "type": "content_block_start",
+                    "index": self.block_index,
+                    "content_block": { "type": "text", "text": "" }
+                })));
+                chunks.push(self.emit_delta("text_delta", json!({ "text": grounding_text })));
+                chunks.push(self.emit("content_block_stop", json!({ "type": "content_block_stop", "index": self.block_index })));
+                self.block_index += 1;
+            }
+        }
+
         // 确定 stop_reason
         let stop_reason = if self.used_tool {
             "tool_use"
@@ -230,6 +281,7 @@ impl StreamingState {
             .unwrap_or(Usage {
                 input_tokens: 0,
                 output_tokens: 0,
+                server_tool_use: None,
             });
 
         chunks.push(self.emit(
@@ -242,7 +294,9 @@ impl StreamingState {
         ));
 
         if !self.message_stop_sent {
-            chunks.push(Bytes::from("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"));
+            chunks.push(Bytes::from(
+                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+            ));
             self.message_stop_sent = true;
         }
 
@@ -309,8 +363,14 @@ impl<'a> PartProcessor<'a> {
                             "content_block": { "type": "thinking", "thinking": "" }
                         }),
                     ));
-                    chunks.push(self.state.emit_delta("thinking_delta", json!({ "thinking": "" })));
-                    chunks.push(self.state.emit_delta("signature_delta", json!({ "signature": trailing_sig })));
+                    chunks.push(
+                        self.state
+                            .emit_delta("thinking_delta", json!({ "thinking": "" })),
+                    );
+                    chunks.push(
+                        self.state
+                            .emit_delta("signature_delta", json!({ "signature": trailing_sig })),
+                    );
                     chunks.extend(self.state.end_block());
                 }
             }
@@ -359,8 +419,14 @@ impl<'a> PartProcessor<'a> {
                         "content_block": { "type": "thinking", "thinking": "" }
                     }),
                 ));
-                chunks.push(self.state.emit_delta("thinking_delta", json!({ "thinking": "" })));
-                chunks.push(self.state.emit_delta("signature_delta", json!({ "signature": trailing_sig })));
+                chunks.push(
+                    self.state
+                        .emit_delta("thinking_delta", json!({ "thinking": "" })),
+                );
+                chunks.push(
+                    self.state
+                        .emit_delta("signature_delta", json!({ "signature": trailing_sig })),
+                );
                 chunks.extend(self.state.end_block());
             }
         }
@@ -374,7 +440,10 @@ impl<'a> PartProcessor<'a> {
         }
 
         if !text.is_empty() {
-            chunks.push(self.state.emit_delta("thinking_delta", json!({ "thinking": text })));
+            chunks.push(
+                self.state
+                    .emit_delta("thinking_delta", json!({ "thinking": text })),
+            );
         }
 
         // 暂存签名
@@ -407,8 +476,14 @@ impl<'a> PartProcessor<'a> {
                         "content_block": { "type": "thinking", "thinking": "" }
                     }),
                 ));
-                chunks.push(self.state.emit_delta("thinking_delta", json!({ "thinking": "" })));
-                chunks.push(self.state.emit_delta("signature_delta", json!({ "signature": trailing_sig })));
+                chunks.push(
+                    self.state
+                        .emit_delta("thinking_delta", json!({ "thinking": "" })),
+                );
+                chunks.push(
+                    self.state
+                        .emit_delta("signature_delta", json!({ "signature": trailing_sig })),
+                );
                 chunks.extend(self.state.end_block());
             }
         }
@@ -416,7 +491,10 @@ impl<'a> PartProcessor<'a> {
         // 非空 text 带签名 - 立即处理
         if signature.is_some() {
             // 2. 开始新 text 块并发送内容
-            chunks.extend(self.state.start_block(BlockType::Text, json!({ "type": "text", "text": "" })));
+            chunks.extend(
+                self.state
+                    .start_block(BlockType::Text, json!({ "type": "text", "text": "" })),
+            );
             chunks.push(self.state.emit_delta("text_delta", json!({ "text": text })));
             chunks.extend(self.state.end_block());
 
@@ -429,8 +507,14 @@ impl<'a> PartProcessor<'a> {
                     "content_block": { "type": "thinking", "thinking": "" }
                 }),
             ));
-            chunks.push(self.state.emit_delta("thinking_delta", json!({ "thinking": "" })));
-            chunks.push(self.state.emit_delta("signature_delta", json!({ "signature": signature.unwrap() })));
+            chunks.push(
+                self.state
+                    .emit_delta("thinking_delta", json!({ "thinking": "" })),
+            );
+            chunks.push(self.state.emit_delta(
+                "signature_delta",
+                json!({ "signature": signature.unwrap() }),
+            ));
             chunks.extend(self.state.end_block());
 
             return chunks;
@@ -438,7 +522,10 @@ impl<'a> PartProcessor<'a> {
 
         // 普通 text (无签名)
         if self.state.current_block_type() != BlockType::Text {
-            chunks.extend(self.state.start_block(BlockType::Text, json!({ "type": "text", "text": "" })));
+            chunks.extend(
+                self.state
+                    .start_block(BlockType::Text, json!({ "type": "text", "text": "" })),
+            );
         }
 
         chunks.push(self.state.emit_delta("text_delta", json!({ "text": text })));
@@ -446,15 +533,22 @@ impl<'a> PartProcessor<'a> {
         chunks
     }
 
-    /// 处理 FunctionCall
-    /// 处理 FunctionCall
-    fn process_function_call(&mut self, fc: &FunctionCall, signature: Option<String>) -> Vec<Bytes> {
+    /// Process FunctionCall and capture signature for global storage
+    fn process_function_call(
+        &mut self,
+        fc: &FunctionCall,
+        signature: Option<String>,
+    ) -> Vec<Bytes> {
         let mut chunks = Vec::new();
 
         self.state.mark_tool_used();
 
         let tool_id = fc.id.clone().unwrap_or_else(|| {
-            format!("{}-{}", fc.name, crate::proxy::common::utils::generate_random_id())
+            format!(
+                "{}-{}",
+                fc.name,
+                crate::proxy::common::utils::generate_random_id()
+            )
         });
 
         // 1. 发送 content_block_start (input 为空对象)
@@ -465,8 +559,14 @@ impl<'a> PartProcessor<'a> {
             "input": {} // 必须为空，参数通过 delta 发送
         });
 
-        if let Some(sig) = signature {
+        if let Some(ref sig) = signature {
             tool_use["signature"] = json!(sig);
+            // Store signature to global storage for replay in subsequent requests
+            store_thought_signature(sig);
+            tracing::info!(
+                "[Claude-SSE] Captured thought_signature for function call (length: {})",
+                sig.len()
+            );
         }
 
         chunks.extend(self.state.start_block(BlockType::Function, tool_use));
@@ -474,10 +574,10 @@ impl<'a> PartProcessor<'a> {
         // 2. 发送 input_json_delta (完整的参数 JSON 字符串)
         if let Some(args) = &fc.args {
             let json_str = serde_json::to_string(args).unwrap_or_else(|_| "{}".to_string());
-            chunks.push(self.state.emit_delta(
-                "input_json_delta",
-                json!({ "partial_json": json_str })
-            ));
+            chunks.push(
+                self.state
+                    .emit_delta("input_json_delta", json!({ "partial_json": json_str })),
+            );
         }
 
         // 3. 结束块
@@ -518,11 +618,11 @@ mod tests {
     fn test_process_function_call_deltas() {
         let mut state = StreamingState::new();
         let mut processor = PartProcessor::new(&mut state);
-        
+
         let fc = FunctionCall {
             name: "test_tool".to_string(),
             args: Some(json!({"arg": "value"})),
-            id: Some("call_123".to_string())
+            id: Some("call_123".to_string()),
         };
 
         // Create a dummy GeminiPart with function_call
@@ -536,7 +636,8 @@ mod tests {
         };
 
         let chunks = processor.process(&part);
-        let output = chunks.iter()
+        let output = chunks
+            .iter()
             .map(|b| String::from_utf8(b.to_vec()).unwrap())
             .collect::<Vec<_>>()
             .join("");
@@ -552,7 +653,7 @@ mod tests {
         assert!(output.contains(r#""type":"input_json_delta""#));
         // partial_json should contain escaped JSON string
         assert!(output.contains(r#"partial_json":"{\"arg\":\"value\"}"#));
-        
+
         // 3. content_block_stop
         assert!(output.contains(r#""type":"content_block_stop""#));
     }
