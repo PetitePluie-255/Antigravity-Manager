@@ -46,17 +46,16 @@ RUN mkdir -p src/bin && \
 
 # Build dependencies only (cached if Cargo.toml/lock unchanged)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
     cargo build --release 2>/dev/null || true
 
 # Copy actual source code
 COPY server/ .
 
-# Build the actual binary (uses cached dependencies)
+# Build the actual binary (without target cache to ensure correct binary)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
     cargo build --release --bin antigravity-server && \
-    cp target/release/antigravity-server /antigravity-server
+    cp target/release/antigravity-server /antigravity-server && \
+    strip /antigravity-server
 
 # ============================================
 # Stage 3: Production Image
