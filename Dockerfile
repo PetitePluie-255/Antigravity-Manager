@@ -27,7 +27,7 @@ RUN pnpm run build
 # ============================================
 # Stage 2: Build Rust Backend (Axum Server)
 # ============================================
-FROM rust:1.83-slim AS backend-builder
+FROM rustlang/rust:nightly-slim AS backend-builder
 WORKDIR /app
 
 # Install build dependencies (cached)
