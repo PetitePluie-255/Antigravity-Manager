@@ -55,12 +55,12 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         tracing::info!("从全局存储获取到 thoughtSignature (长度: {})", global_thought_sig.as_ref().unwrap().len());
     }
 
-    // 2. 构建 Gemini contents (过滤掉 system)
+    // 2. 构建 Gemini contents (过滤掉 system 和空消息)
     let contents: Vec<Value> = request
         .messages
         .iter()
         .filter(|msg| msg.role != "system")
-        .map(|msg| {
+        .filter_map(|msg| {
             let role = match msg.role.as_str() {
                 "assistant" => "model",
                 "tool" | "function" => "user", 
@@ -74,25 +74,14 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 match content {
                     OpenAIContent::String(s) => {
                         if !s.is_empty() {
-                            if role == "user" && mapped_model.contains("gemini-3") {
-                                // 为 Gemini 3 用户消息添加提醒补丁
-                                let reminder = "\n\n(SYSTEM REMINDER: You MUST use the 'shell' tool to perform this action. Do not simply state it is done.)";
-                                parts.push(json!({"text": format!("{}{}", s, reminder)}));
-                            } else {
-                                parts.push(json!({"text": s}));
-                            }
+                            parts.push(json!({"text": s}));
                         }
                     }
                     OpenAIContent::Array(blocks) => {
                         for block in blocks {
                             match block {
                                 OpenAIContentBlock::Text { text } => {
-                                    if role == "user" && mapped_model.contains("gemini-3") {
-                                        let reminder = "\n\n(SYSTEM REMINDER: You MUST use the 'shell' tool to perform this action. Do not simply state it is done.)";
-                                        parts.push(json!({ "text": format!("{}{}", text, reminder) }));
-                                    } else {
-                                        parts.push(json!({"text": text}));
-                                    }
+                                    parts.push(json!({"text": text}));
                                 }
                                 OpenAIContentBlock::ImageUrl { image_url } => {
                                     if image_url.url.starts_with("data:") {
@@ -166,7 +155,12 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 }));
             }
 
-            json!({ "role": role, "parts": parts })
+            // 过滤掉空 parts 的消息
+            if parts.is_empty() {
+                None
+            } else {
+                Some(json!({ "role": role, "parts": parts }))
+            }
         })
         .collect();
 
