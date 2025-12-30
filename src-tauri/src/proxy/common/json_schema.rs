@@ -69,7 +69,8 @@ fn flatten_refs(map: &mut serde_json::Map<String, Value>, defs: &serde_json::Map
 fn clean_json_schema_recursive(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            // 1. 先递归处理所有子节点，确保嵌套结构被正确清理
+            // 1. [CRITICAL] 深度递归处理：必须遍历当前对象的所有字段名对应的 Value
+            // 解决 properties/items 之外的 definitions、anyOf、allOf 等结构的清理
             for v in map.values_mut() {
                 clean_json_schema_recursive(v);
             }
@@ -90,12 +91,9 @@ fn clean_json_schema_recursive(value: &mut Value) {
 
             for (field, label) in validation_fields {
                 if let Some(val) = map.remove(field) {
-                    // 仅当值是简单类型时才迁移（避免将对象定义的属性名误删，虽然由层级控制，但通过 Value 类型检查更稳妥）
+                    // 仅当值是简单类型时才迁移
                     if val.is_string() || val.is_number() || val.is_boolean() {
                         constraints.push(format!("{}: {}", label, val));
-                    } else {
-                        // 如果不是预期类型，原样放回（可能是特殊属性定义）
-                        map.insert(field.to_string(), val);
                     }
                 }
             }
@@ -119,17 +117,11 @@ fn clean_json_schema_recursive(value: &mut Value) {
                 "default",
                 "const",
                 "examples",
-                // MCP 工具常用但 Gemini 不支持的高级逻辑字段
                 "propertyNames",
-                "anyOf",
-                "oneOf",
-                "allOf",
-                "not",
+                "anyOf", "oneOf", "allOf", "not",
                 "if", "then", "else",
-                "dependencies",
-                "dependentSchemas",
-                "dependentRequired",
-                "cache_control", // 解决用户提到的 cache_control 触发的 400 错误
+                "dependencies", "dependentSchemas", "dependentRequired",
+                "cache_control",
             ];
             for field in hard_remove_fields {
                 map.remove(field);
@@ -142,7 +134,6 @@ fn clean_json_schema_recursive(value: &mut Value) {
                         *type_val = Value::String(s.to_lowercase());
                     }
                     Value::Array(arr) => {
-                        // 联合类型降级：取第一个非 null 类型
                         let mut selected_type = "string".to_string(); 
                         for item in arr {
                             if let Value::String(s) = item {

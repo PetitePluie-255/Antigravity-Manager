@@ -16,7 +16,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         .and_then(|p| p.as_array()) {
             
         for part in parts {
-            // 思维链/推理部分 (Gemini 2.0+)
+            /* 暂时禁用：思维链/推理部分 (Gemini 2.0+) 避免干扰 Codex CLI 等非推理客户端
             if let Some(thought) = part.get("thought").and_then(|t| t.as_str()) {
                 if !thought.is_empty() {
                     content_out.push_str("<thought>\n");
@@ -24,6 +24,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                     content_out.push_str("\n</thought>\n\n");
                 }
             }
+            */
 
             // 文本部分
             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {

@@ -55,9 +55,9 @@ pub fn resolve_request_config(
         || mapped_model.contains("claude-4");
 
     // Determine if we should enable networking
-    // 策略优化：如果请求显式带了本地工具 (MCP)，哪怕是 Sonnet 等顶级模型，也不自动开启联网，防止触发 400 冲突。
-    // 除非用户显式通过 -online 后缀要求联网。
-    let enable_networking = is_online_suffix || (is_high_quality_model && !has_non_networking) || has_networking_tool;
+    // [FIX] 禁用基于模型的自动联网逻辑，防止图像请求被联网搜索结果覆盖。
+    // 仅在用户显式请求联网时启用：1) -online 后缀 2) 携带联网工具定义
+    let enable_networking = is_online_suffix || has_networking_tool;
 
     // The final model to send upstream should be the MAPPED model, 
     // but if searching, we MUST ensure the model name is one the backend associates with search.

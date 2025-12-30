@@ -1,6 +1,6 @@
 [package]
 name = "antigravity_tools"
-version = "3.3.2"
+version = "3.3.5"
 description = "A Tauri App"
 authors = ["you"]
 license = "CC-BY-NC-SA-4.0"
@@ -38,7 +38,7 @@ chrono = "0.4"
 dirs = "5.0"
 reqwest = { version = "0.12", features = ["json", "stream", "socks"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
 tracing-appender = "0.2.4"
 tracing-log = "0.2.0"
 rusqlite = { version = "0.32", features = ["bundled"] }

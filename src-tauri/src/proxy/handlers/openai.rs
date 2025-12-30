@@ -53,7 +53,8 @@ pub async fn handle_chat_completions(
         let config = crate::proxy::mappers::common_utils::resolve_request_config(&openai_req.model, &mapped_model, &tools_val);
 
         // 3. 获取 Token (使用准确的 request_type)
-        let (access_token, project_id, email) = match token_manager.get_token(&config.request_type, false).await {
+        // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
+        let (access_token, project_id, email) = match token_manager.get_token(&config.request_type, attempt > 0).await {
             Ok(t) => t,
             Err(e) => {
                 return Err((StatusCode::SERVICE_UNAVAILABLE, format!("Token error: {}", e)));
@@ -64,6 +65,11 @@ pub async fn handle_chat_completions(
 
         // 4. 转换请求
         let gemini_body = transform_openai_request(&openai_req, &project_id, &mapped_model);
+        
+        // [New] 打印转换后的报文 (Gemini Body) 供调试
+        if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
+            tracing::info!("[OpenAI-Request] Transformed Gemini Body:\n{}", body_json);
+        }
 
         // 5. 发送请求
         let list_response = openai_req.stream;
@@ -116,6 +122,9 @@ pub async fn handle_chat_completions(
         let status_code = status.as_u16();
         let error_text = response.text().await.unwrap_or_default();
         last_error = format!("HTTP {}: {}", status_code, error_text);
+
+        // [New] 打印错误报文日志
+        tracing::error!("[OpenAI-Upstream] Error Response {}: {}", status_code, error_text);
  
         // 429 智能处理
         if status_code == 429 {
@@ -217,17 +226,56 @@ pub async fn handle_completions(
                         let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("user");
                         let content = item.get("content").and_then(|v| v.as_array());
                         let mut text_parts = Vec::new();
+                        let mut image_parts: Vec<Value> = Vec::new();
+                        
                         if let Some(parts) = content {
                             for part in parts {
+                                // 处理文本块
                                 if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                                    text_parts.push(text);
+                                    text_parts.push(text.to_string());
+                                }
+                                // [NEW] 处理图像块 (Codex input_image 格式)
+                                else if part.get("type").and_then(|v| v.as_str()) == Some("input_image") {
+                                    if let Some(image_url) = part.get("image_url").and_then(|v| v.as_str()) {
+                                        image_parts.push(json!({
+                                            "type": "image_url",
+                                            "image_url": { "url": image_url }
+                                        }));
+                                        tracing::info!("[Codex] Found input_image: {}", image_url);
+                                    }
+                                }
+                                // [NEW] 兼容标准 OpenAI image_url 格式
+                                else if part.get("type").and_then(|v| v.as_str()) == Some("image_url") {
+                                    if let Some(url_obj) = part.get("image_url") {
+                                        image_parts.push(json!({
+                                            "type": "image_url",
+                                            "image_url": url_obj.clone()
+                                        }));
+                                    }
                                 }
                             }
                         }
-                        messages.push(json!({
-                            "role": role,
-                            "content": text_parts.join("\n")
-                        }));
+                        
+                        // 构造消息内容：如果有图像则使用数组格式
+                        if image_parts.is_empty() {
+                            messages.push(json!({
+                                "role": role,
+                                "content": text_parts.join("\n")
+                            }));
+                        } else {
+                            let mut content_blocks: Vec<Value> = Vec::new();
+                            if !text_parts.is_empty() {
+                                content_blocks.push(json!({
+                                    "type": "text",
+                                    "text": text_parts.join("\n")
+                                }));
+                            }
+                            content_blocks.extend(image_parts);
+                            messages.push(json!({
+                                "role": role,
+                                "content": content_blocks
+                            }));
+                        }
                     }
                     "function_call" | "local_shell_call" | "web_search_call" => {
                         let mut name = item.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
@@ -373,6 +421,12 @@ pub async fn handle_completions(
         tracing::info!("Using account: {} for completions request (type: {})", email, config.request_type);
 
         let gemini_body = transform_openai_request(&openai_req, &project_id, &mapped_model);
+
+        // [New] 打印转换后的报文 (Gemini Body) 供调试 (Codex 路径)
+        if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body) {
+            tracing::info!("[Codex-Request] Transformed Gemini Body:\n{}", body_json);
+        }
+
         let list_response = openai_req.stream;
         let method = if list_response { "streamGenerateContent" } else { "generateContent" };
         let query_string = if list_response { Some("alt=sse") } else { None };

@@ -111,7 +111,7 @@ pub fn create_openai_sse_stream(
                                             }
                                             // Capture thought (Thinking Models)
                                             if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                 content_out.push_str(thought_text);
+                                                 // content_out.push_str(thought_text);
                                             }
                                             // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                             if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
@@ -254,10 +254,11 @@ pub fn create_legacy_sse_stream(
                                                 if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                                     content_out.push_str(text);
                                                 }
-                                                // Capture thought
+                                                /* 禁用思维链输出到正文
                                                 if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                     content_out.push_str(thought_text);
+                                                    // // content_out.push_str(thought_text);
                                                 }
+                                                */
                                                 // 捕获 thoughtSignature
                                                 // 捕获 thoughtSignature 到全局存储
                                                 if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
@@ -388,11 +389,12 @@ pub fn create_codex_sse_stream(
                                                     let clean_text = text.replace('“', "\"").replace('”', "\"");
                                                     delta_text.push_str(&clean_text);
                                                 }
-                                                // Capture thought
+                                                /* 禁用思维链输出到正文
                                                 if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
                                                     let clean_thought = thought_text.replace('"', "\"").replace('"', "\"");
-                                                    delta_text.push_str(&clean_thought);
+                                                    // delta_text.push_str(&clean_thought);
                                                 }
+                                                */
                                                 // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                                 // 存储到全局状态，不再嵌入到用户可见的文本中
                                                 if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {

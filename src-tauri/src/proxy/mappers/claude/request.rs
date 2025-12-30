@@ -46,7 +46,15 @@ pub fn transform_claude_request_in(
     let config = crate::proxy::mappers::common_utils::resolve_request_config(&claude_req.model, &mapped_model, &tools_val);
     // Only Gemini models support our "dummy thought" workaround.
     // Claude models routed via Vertex/Google API often require valid thought signatures.
-    let allow_dummy_thought = config.final_model.starts_with("gemini-");
+    // [FIX] Whenever thinking is enabled, we MUST allow dummy thought injection to satisfy 
+    // Google's strict validation of historical messages, even for non-agent (e.g. search) tasks.
+    let is_thinking_enabled = claude_req
+        .thinking
+        .as_ref()
+        .map(|t| t.type_ == "enabled")
+        .unwrap_or(false);
+
+    let allow_dummy_thought = is_thinking_enabled;
 
     // 4. Generation Config & Thinking
     let generation_config = build_generation_config(claude_req, has_web_search_tool);
@@ -230,6 +238,7 @@ fn build_contents(
                         ContentBlock::Thinking { thinking, signature, .. } => {
                             let mut part = json!({
                                 "text": thinking,
+                                "thought": true, // [CRITICAL FIX] Vertex AI v1internal requires thought: true to distinguish from text
                             });
                             // [New] 递归清理黑名单字段（如 cache_control）
                             crate::proxy::common::json_schema::clean_json_schema(&mut part);
@@ -355,11 +364,16 @@ fn build_contents(
         }
 
         // Fix for "Thinking enabled, assistant message must start with thinking block" 400 error
-        // ONLY apply this for the LAST assistant message (Pre-fill scenario)
-        if allow_dummy_thought && role == "model" && is_thinking_enabled && i == msg_count - 1 {
+        // [Optimization] Apply this to ALL assistant messages in history, not just the last one.
+        // Vertex AI requires every assistant message to start with a thinking block when thinking is enabled.
+        if allow_dummy_thought && role == "model" && is_thinking_enabled {
             let has_thought_part = parts
                 .iter()
-                .any(|p| p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false));
+                .any(|p| {
+                    p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false)
+                        || p.get("thoughtSignature").is_some()
+                        || p.get("thought").and_then(|v| v.as_str()).is_some() // 某些情况下可能是 text + thought: true 的组合
+                });
 
             if !has_thought_part {
                 // Prepend a dummy thinking block to satisfy Gemini v1internal requirements
@@ -370,6 +384,33 @@ fn build_contents(
                         "thought": true
                     }),
                 );
+                tracing::debug!("Injected dummy thought block for historical assistant message at index {}", contents.len());
+            } else {
+                // [Crucial Check] 即使有 thought 块，也必须保证它位于 parts 的首位 (Index 0)
+                // 且必须包含 thought: true 标记
+                let first_is_thought = parts.get(0).map_or(false, |p| {
+                    (p.get("thought").is_some() || p.get("thoughtSignature").is_some())
+                    && p.get("text").is_some() // 对于 v1internal，通常 text + thought: true 才是合规的思维块
+                });
+
+                if !first_is_thought {
+                    // 如果首项不符合思维块特征，强制补入一个
+                    parts.insert(
+                        0,
+                        json!({
+                            "text": "...",
+                            "thought": true
+                        }),
+                    );
+                    tracing::warn!("First part of model message at {} is not a valid thought block. Prepending dummy.", contents.len());
+                } else {
+                    // 确保首项包含了 thought: true (防止只有 signature 的情况)
+                    if let Some(p0) = parts.get_mut(0) {
+                        if p0.get("thought").is_none() {
+                             p0.as_object_mut().map(|obj| obj.insert("thought".to_string(), json!(true)));
+                        }
+                    }
+                }
             }
         }
 
@@ -571,13 +612,13 @@ mod tests {
         assert!(schema["properties"]["unit"].get("default").is_none());
         assert!(schema["properties"]["date"].get("format").is_none());
 
-        // Check union type handling ["string", "null"] -> "STRING"
-        assert_eq!(schema["properties"]["unit"]["type"], "STRING");
+        // Check union type handling ["string", "null"] -> "string"
+        assert_eq!(schema["properties"]["unit"]["type"], "string");
 
-        // Check types are uppercased
-        assert_eq!(schema["type"], "OBJECT");
-        assert_eq!(schema["properties"]["location"]["type"], "STRING");
-        assert_eq!(schema["properties"]["date"]["type"], "STRING");
+        // Check types are lowercased
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["location"]["type"], "string");
+        assert_eq!(schema["properties"]["date"]["type"], "string");
     }
 
     #[test]
@@ -591,12 +632,15 @@ mod tests {
                 },
                 Message {
                     role: "assistant".to_string(),
+                    content: MessageContent::Array(vec![
                         ContentBlock::ToolUse {
                             id: "call_1".to_string(),
                             name: "run_command".to_string(),
                             input: json!({"command": "ls"}),
                             signature: None,
+                            cache_control: None,
                         }
+                    ]),
                 },
                 Message {
                     role: "user".to_string(),

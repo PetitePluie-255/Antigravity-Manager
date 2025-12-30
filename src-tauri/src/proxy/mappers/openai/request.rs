@@ -98,6 +98,43 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                                         parts.push(json!({
                                             "fileData": { "fileUri": &image_url.url, "mimeType": "image/jpeg" }
                                         }));
+                                    } else {
+                                        // [NEW] 处理本地文件路径 (file:// 或 Windows/Unix 路径)
+                                        let file_path = if image_url.url.starts_with("file://") {
+                                            // 移除 file:// 前缀
+                                            #[cfg(target_os = "windows")]
+                                            { image_url.url.trim_start_matches("file:///").replace('/', "\\") }
+                                            #[cfg(not(target_os = "windows"))]
+                                            { image_url.url.trim_start_matches("file://").to_string() }
+                                        } else {
+                                            image_url.url.clone()
+                                        };
+                                        
+                                        tracing::info!("[OpenAI-Request] Reading local image: {}", file_path);
+                                        
+                                        // 读取文件并转换为 base64
+                                        if let Ok(file_bytes) = std::fs::read(&file_path) {
+                                            use base64::Engine as _;
+                                            let b64 = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
+                                            
+                                            // 根据文件扩展名推断 MIME 类型
+                                            let mime_type = if file_path.to_lowercase().ends_with(".png") {
+                                                "image/png"
+                                            } else if file_path.to_lowercase().ends_with(".gif") {
+                                                "image/gif"
+                                            } else if file_path.to_lowercase().ends_with(".webp") {
+                                                "image/webp"
+                                            } else {
+                                                "image/jpeg"
+                                            };
+                                            
+                                            parts.push(json!({
+                                                "inlineData": { "mimeType": mime_type, "data": b64 }
+                                            }));
+                                            tracing::info!("[OpenAI-Request] Successfully loaded image: {} ({} bytes)", file_path, file_bytes.len());
+                                        } else {
+                                            tracing::warn!("[OpenAI-Request] Failed to read local image: {}", file_path);
+                                        }
                                     }
                                 }
                             }
@@ -109,12 +146,13 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
             // Handle tool calls (assistant message)
             if let Some(tool_calls) = &msg.tool_calls {
                 for (index, tc) in tool_calls.iter().enumerate() {
-                    // Inject Thought before function call (PR #93)
+                    /* 暂时移除：防止 Codex CLI 界面碎片化
                     if index == 0 && parts.is_empty() {
                          if mapped_model.contains("gemini-3") {
                               parts.push(json!({"text": "Thinking Process: Determining necessary tool actions."}));
                          }
                     }
+                    */
 
                     let args = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or(json!({}));
                     let mut func_call_part = json!({
@@ -149,7 +187,6 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 parts.push(json!({
                     "functionResponse": {
                        "name": final_name,
-                       "id": msg.tool_call_id.as_deref().unwrap_or("unknown"),
                        "response": { "result": content_val }
                     }
                 }));
@@ -163,6 +200,22 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
             }
         })
         .collect();
+
+    // [PR #合并] 合并连续相同角色的消息 (Gemini 强制要求 user/model 交替)
+    let mut merged_contents: Vec<Value> = Vec::new();
+    for msg in contents {
+        if let Some(last) = merged_contents.last_mut() {
+            if last["role"] == msg["role"] {
+                // 合并 parts
+                if let (Some(last_parts), Some(msg_parts)) = (last["parts"].as_array_mut(), msg["parts"].as_array()) {
+                    last_parts.extend(msg_parts.iter().cloned());
+                    continue;
+                }
+            }
+        }
+        merged_contents.push(msg);
+    }
+    let contents = merged_contents;
 
     // 3. 构建请求体
     let mut gen_config = json!({
@@ -226,16 +279,29 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 }
             }
 
+            // [NEW CRITICAL FIX] 清除函数定义根层级的非法字段 (解决报错持久化)
+            if let Some(obj) = gemini_func.as_object_mut() {
+                obj.remove("format");
+                obj.remove("strict");
+                obj.remove("additionalProperties");
+                obj.remove("type"); // [NEW] Gemini 不支持在 FunctionDeclaration 根层级出现 type: "function"
+            }
+
             if let Some(params) = gemini_func.get_mut("parameters") {
-                // 先应用全局清洗
+                // [DEEP FIX] 统一调用公共库清洗：展开 $ref 并剔除所有层级的 format/definitions
                 crate::proxy::common::json_schema::clean_json_schema(params);
-                // 再应用 Gemini 专有映射 (PR #93)
+
+                // Gemini v1internal 要求：
+                // 1. type 必须是大写 (OBJECT, STRING 等)
+                // 2. 根对象必须有 "type": "OBJECT"
                 if let Some(params_obj) = params.as_object_mut() {
                     if !params_obj.contains_key("type") {
                         params_obj.insert("type".to_string(), json!("OBJECT"));
                     }
                 }
-                map_json_schema_to_gemini(params);
+                
+                // 递归转换 type 为大写 (符合 Protobuf 定义)
+                enforce_uppercase_types(params);
             }
             function_declarations.push(gemini_func);
         }
@@ -277,26 +343,26 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     })
 }
 
-fn map_json_schema_to_gemini(value: &mut Value) {
-    if let Some(obj) = value.as_object_mut() {
-        let allowed_keys = ["type", "description", "properties", "required", "items", "enum", "format", "nullable"];
-        obj.retain(|k, _| allowed_keys.contains(&k.as_str()));
-
-        let type_str = obj.get("type").and_then(|t| t.as_str()).map(|s| s.to_string());
-        if let Some(s) = type_str {
-            obj.insert("type".to_string(), json!(s.to_uppercase()));
+fn enforce_uppercase_types(value: &mut Value) {
+    if let Value::Object(map) = value {
+        if let Some(type_val) = map.get_mut("type") {
+            if let Value::String(ref mut s) = type_val {
+                *s = s.to_uppercase();
+            }
         }
-        
-        if let Some(properties) = obj.get_mut("properties") {
-            if let Some(props_obj) = properties.as_object_mut() {
-                for (_, prop_val) in props_obj {
-                    map_json_schema_to_gemini(prop_val);
+        if let Some(properties) = map.get_mut("properties") {
+            if let Value::Object(ref mut props) = properties {
+                for v in props.values_mut() {
+                    enforce_uppercase_types(v);
                 }
             }
         }
-        
-        if let Some(items) = obj.get_mut("items") {
-             map_json_schema_to_gemini(items);
+        if let Some(items) = map.get_mut("items") {
+             enforce_uppercase_types(items);
+        }
+    } else if let Value::Array(arr) = value {
+        for item in arr {
+            enforce_uppercase_types(item);
         }
     }
 }

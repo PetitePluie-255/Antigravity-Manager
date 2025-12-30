@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "antigravity_tools"
-version = "3.3.2"
+version = "3.3.5"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6223,6 +6223,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "time",
  "tracing",
  "tracing-core",
  "tracing-log",
