@@ -1,9 +1,11 @@
 services:
   antigravity:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: antigravity-manager:latest
+    # Use pre-built image from GitHub Container Registry
+    # To use local build instead, comment out 'image' and uncomment 'build'
+    image: ghcr.io/petitepluie-255/antigravity-manager:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: antigravity-manager
     ports:
       - "3000:3000"
