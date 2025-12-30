@@ -8,7 +8,7 @@ services:
       - "3000:3000" # 管理界面
       - "8045:8045" # API 反代
     volumes:
-      - antigravity-data:/data
+      - ./data:/data
     environment:
       - PORT=30000
       - DATA_DIR=/data
