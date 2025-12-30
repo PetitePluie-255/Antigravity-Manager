@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
 COPY server/Cargo.toml server/Cargo.lock ./
 
 # Create dummy source files for dependency caching
-RUN mkdir -p src/bin && \
+RUN mkdir -p src && \
     echo "fn main() {}" > src/main.rs && \
     echo "pub fn lib() {}" > src/lib.rs
 
@@ -48,10 +48,13 @@ RUN mkdir -p src/bin && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release 2>/dev/null || true
 
-# Copy actual source code
-COPY server/ .
+# Remove dummy files and clean target to force rebuild
+RUN rm -rf src target
 
-# Build the actual binary (without target cache to ensure correct binary)
+# Copy actual source code
+COPY server/src ./src
+
+# Build the actual binary
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --bin antigravity-server && \
     cp target/release/antigravity-server /antigravity-server && \
