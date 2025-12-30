@@ -76,19 +76,28 @@ pub async fn add_account(
     State(state): State<Arc<WebAppState>>,
     Json(req): Json<AddAccountRequest>,
 ) -> Response {
-    // 简化的 token 创建 (Web 模式下需要手动输入 refresh_token)
-    let token = TokenData::new(
-        String::new(), // access_token 为空，需要刷新
-        req.refresh_token,
-        0,
-        Some(req.email.clone()),
-        None,
-        None,
-    );
+    // 刷新 token 获取 access_token 和邮箱
+    match create_account_from_token(&req.refresh_token).await {
+        Ok((token_data, actual_email)) => {
+            // 使用传入的邮箱或从 token 获取的邮箱
+            let final_email = if req.email.is_empty() {
+                actual_email
+            } else {
+                req.email
+            };
 
-    match AccountService::add_account(&state.storage, &state.emitter, req.email, req.name, token) {
-        Ok(account) => ApiResponse::ok(account).into_response(),
-        Err(e) => ApiResponse::err(e).into_response(),
+            match AccountService::add_account(
+                &state.storage,
+                &state.emitter,
+                final_email,
+                req.name,
+                token_data,
+            ) {
+                Ok(account) => ApiResponse::ok(account).into_response(),
+                Err(e) => ApiResponse::err(e).into_response(),
+            }
+        }
+        Err(e) => ApiResponse::err(format!("Token 刷新失败: {}", e)).into_response(),
     }
 }
 
