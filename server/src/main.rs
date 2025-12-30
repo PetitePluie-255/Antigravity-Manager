@@ -43,6 +43,16 @@ async fn main() {
 
     let app_state = Arc::new(state);
 
+    // Load accounts into TokenManager on startup
+    match app_state.token_manager.load_accounts().await {
+        Ok(count) => {
+            tracing::info!("Loaded {} accounts into token pool on startup", count);
+        }
+        Err(e) => {
+            tracing::warn!("Failed to load accounts on startup: {} (this may be expected if no accounts exist yet)", e);
+        }
+    }
+
     // Add CORS
     let cors = CorsLayer::permissive();
 
