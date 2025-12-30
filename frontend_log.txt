@@ -1,0 +1,12 @@
+
+> antigravity-tools@3.3.5 dev
+> vite
+
+
+  VITE v7.3.0  ready in 223 ms
+
+  ➜  Local:   http://localhost:1420/
+  ➜  Network: http://10.198.107.33:1420/
+  ➜  Network: http://41.10.1.7:1420/
+  ➜  Network: http://198.18.0.1:1420/
+  ➜  press h + enter to show help

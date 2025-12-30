@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.4
 
-# Stage 1: Build Frontend
+# ============================================
+# Stage 1: Build Frontend (React + Vite)
+# ============================================
 FROM node:20-slim AS frontend-builder
 WORKDIR /app
 
@@ -8,22 +10,24 @@ WORKDIR /app
 RUN npm install -g pnpm
 
 # Copy package files first (for dependency caching)
-COPY package.json pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml ./
 
 # Install dependencies (cached if package files unchanged)
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 # Copy source files
-COPY src/ ./src/
-COPY public/ ./public/
-COPY index.html vite.config.ts tsconfig*.json tailwind.config.js postcss.config.cjs ./
+COPY web/src/ ./src/
+COPY web/public/ ./public/
+COPY web/index.html web/vite.config.ts web/tsconfig*.json web/tailwind.config.js web/postcss.config.cjs ./
 
-# Build frontend
+# Build frontend for production
 RUN pnpm run build
 
-# Stage 2: Build Rust Backend
-FROM rustlang/rust:nightly-slim AS backend-builder
+# ============================================
+# Stage 2: Build Rust Backend (Axum Server)
+# ============================================
+FROM rust:1.83-slim AS backend-builder
 WORKDIR /app
 
 # Install build dependencies (cached)
@@ -33,29 +37,30 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt-get install -y pkg-config libssl-dev
 
 # Copy Cargo files first for dependency caching
-COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./
+COPY server/Cargo.toml server/Cargo.lock ./
 
 # Create dummy source files for dependency caching
 RUN mkdir -p src/bin && \
     echo "fn main() {}" > src/main.rs && \
-    echo "fn main() {}" > src/bin/server.rs && \
     echo "pub fn lib() {}" > src/lib.rs
 
 # Build dependencies only (cached if Cargo.toml/lock unchanged)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo build --release --no-default-features --features web-server 2>/dev/null || true
+    cargo build --release 2>/dev/null || true
 
 # Copy actual source code
-COPY src-tauri/ .
+COPY server/ .
 
 # Build the actual binary (uses cached dependencies)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    cargo build --release --bin antigravity-server --no-default-features --features web-server && \
+    cargo build --release --bin antigravity-server && \
     cp target/release/antigravity-server /antigravity-server
 
-# Stage 3: Production
+# ============================================
+# Stage 3: Production Image
+# ============================================
 FROM debian:bookworm-slim
 WORKDIR /app
 
@@ -83,7 +88,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/healthz || exit 1
+    CMD curl -f http://localhost:3000/api/config || exit 1
 
 # Run server
 CMD ["antigravity-server", "--port", "3000", "--data-dir", "/data"]

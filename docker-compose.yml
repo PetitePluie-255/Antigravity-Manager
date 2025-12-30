@@ -1,31 +1,27 @@
 services:
-  antigravity-manager:
+  antigravity:
     build:
       context: .
-      network: host
+      dockerfile: Dockerfile
+    image: antigravity-manager:latest
     container_name: antigravity-manager
     ports:
-      - "3000:3000" # 管理界面
-      - "8045:8045" # API 反代
+      - "3000:3000"
     volumes:
-      - ./data:/data
+      - antigravity_data:/data
     environment:
-      - PORT=30000
+      - PORT=3000
       - DATA_DIR=/data
       - STATIC_DIR=/app/dist
-      - BIND_ADDRESS=0.0.0.0
-      # OAuth 回调地址，部署时需修改为实际域名
-      # - BASE_URL=https://xxxxx.com
-      # 自定义 Google OAuth 客户端（可选，不设置则使用默认）
-      # - GOOGLE_CLIENT_ID=<your-oauth-client-id>
-      # - GOOGLE_CLIENT_SECRET=<your-oauth-client-secret>
+      - RUST_LOG=info
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/config"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
 
 volumes:
-  antigravity-data:
+  antigravity_data:
+    driver: local
