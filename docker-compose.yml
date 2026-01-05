@@ -1,8 +1,8 @@
 services:
   antigravity:
     # Use pre-built image from GitHub Container Registry
-    # To use local build instead, comment out 'image' and uncomment 'build'
-    image: ghcr.io/petitepluie-255/antigravity-manager:latest
+    # Available tags: feat-standalone-proxy, latest (main branch), or commit SHA
+    image: ghcr.io/petitepluie-255/antigravity-manager:feat-standalone-proxy
     # build:
     #   context: .
     #   dockerfile: Dockerfile
