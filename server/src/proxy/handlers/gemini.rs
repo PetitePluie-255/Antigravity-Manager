@@ -21,6 +21,7 @@ pub async fn handle_generate(
     Path(model_action): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let start = std::time::Instant::now();
     // 解析 model:method
     let (model_name, method) = if let Some((m, action)) = model_action.rsplit_once(':') {
         (m.to_string(), action.to_string())
@@ -212,6 +213,28 @@ pub async fn handle_generate(
                 .json()
                 .await
                 .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)))?;
+
+            // Extract usage metadata for logging
+            let usage = gemini_resp.get("usageMetadata");
+            let prompt_tokens = usage
+                .and_then(|u| u.get("promptTokenCount"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            let completion_tokens = usage
+                .and_then(|u| u.get("candidatesTokenCount"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            let latency = start.elapsed().as_millis() as u32;
+
+            state.log_store.record(
+                email.clone(),
+                model_name.clone(),
+                prompt_tokens,
+                completion_tokens,
+                latency,
+                200,
+                None,
+            );
 
             let unwrapped = unwrap_response(&gemini_resp);
             return Ok(Json(unwrapped).into_response());

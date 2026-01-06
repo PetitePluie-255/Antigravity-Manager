@@ -27,6 +27,7 @@ pub async fn handle_messages(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ClaudeRequest>,
 ) -> Response {
+    let start = std::time::Instant::now();
     // 生成随机 Trace ID 用户追踪
     let trace_id: String =
         rand::Rng::sample_iter(rand::thread_rng(), &rand::distributions::Alphanumeric)
@@ -416,6 +417,16 @@ pub async fn handle_messages(
                     request_with_mapped.model,
                     claude_response.usage.input_tokens,
                     claude_response.usage.output_tokens
+                );
+
+                state.log_store.record(
+                    email.clone(),
+                    request.model.clone(),
+                    claude_response.usage.input_tokens as u32,
+                    claude_response.usage.output_tokens as u32,
+                    start.elapsed().as_millis() as u32,
+                    200,
+                    None,
                 );
 
                 return Json(claude_response).into_response();
