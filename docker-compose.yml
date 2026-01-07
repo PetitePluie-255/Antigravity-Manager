@@ -2,10 +2,7 @@ services:
   antigravity:
     # Use pre-built image from GitHub Container Registry
     # Available tags: feat-standalone-proxy, latest (main branch), or commit SHA
-    image: ghcr.io/petitepluie-255/antigravity-manager:feat-standalone-proxy
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+    image: ghcr.io/petitepluie-255/antigravity-manager:latest
     container_name: antigravity-manager
     ports:
       - "3000:3000"
@@ -18,7 +15,7 @@ services:
       - RUST_LOG=info
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/config"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/proxy/status"]
       interval: 30s
       timeout: 10s
       retries: 3

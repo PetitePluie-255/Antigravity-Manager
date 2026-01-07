@@ -56,7 +56,7 @@ COPY server/src ./src
 
 # Build the actual binary
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --release --bin antigravity-server && \
+    cargo build --release && \
     cp target/release/antigravity-server /antigravity-server && \
     strip /antigravity-server
 
@@ -90,7 +90,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/api/config || exit 1
+    CMD curl -f http://localhost:3000/api/proxy/status || exit 1
 
 # Run server
 CMD ["antigravity-server", "--port", "3000", "--data-dir", "/data"]
