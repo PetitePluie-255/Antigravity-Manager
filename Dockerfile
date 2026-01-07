@@ -30,11 +30,10 @@ RUN pnpm run build
 FROM rustlang/rust:nightly-slim AS backend-builder
 WORKDIR /app
 
-# Install build dependencies (cached)
-RUN --mount=type=cache,target=/var/cache/apt \
-    --mount=type=cache,target=/var/lib/apt \
-    apt-get update && \
-    apt-get install -y pkg-config libssl-dev
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y pkg-config libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy Cargo files first for dependency caching
 COPY server/Cargo.toml server/Cargo.lock ./
