@@ -84,6 +84,13 @@ pub struct ToolFunction {
     pub arguments: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenAIUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIResponse {
     pub id: String,
@@ -91,15 +98,7 @@ pub struct OpenAIResponse {
     pub created: u64,
     pub model: String,
     pub choices: Vec<Choice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<OpenAIUsage>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenAIUsage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
+    pub usage: OpenAIUsage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

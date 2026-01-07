@@ -47,6 +47,12 @@ pub struct AppState {
     pub upstream: Arc<crate::proxy::upstream::client::UpstreamClient>,
     pub proxy_enabled: Arc<AtomicBool>,
     pub proxy_port: Arc<AtomicU16>, // Persisted config port, for status display
+
+    // z.ai integration fields
+    pub zai: Arc<RwLock<crate::proxy::ZaiConfig>>,
+    pub provider_rr: Arc<std::sync::atomic::AtomicUsize>, // Round-robin counter for provider selection
+    pub zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState,
+    pub monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
 }
 
 impl AppState {
@@ -80,6 +86,10 @@ impl AppState {
             ))),
             proxy_enabled: Arc::new(AtomicBool::new(true)), // Always enabled in integrated mode
             proxy_port: Arc::new(AtomicU16::new(0)),
+            zai: Arc::new(RwLock::new(crate::proxy::ZaiConfig::default())),
+            provider_rr: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new(),
+            monitor: Arc::new(crate::proxy::monitor::ProxyMonitor::default()),
         })
     }
 
@@ -113,6 +123,10 @@ impl AppState {
             ))),
             proxy_enabled: Arc::new(AtomicBool::new(true)), // Always enabled in integrated mode
             proxy_port: Arc::new(AtomicU16::new(0)),
+            zai: Arc::new(RwLock::new(crate::proxy::ZaiConfig::default())),
+            provider_rr: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new(),
+            monitor: Arc::new(crate::proxy::monitor::ProxyMonitor::default()),
         })
     }
 }

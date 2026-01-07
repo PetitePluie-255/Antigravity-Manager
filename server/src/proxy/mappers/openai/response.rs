@@ -27,6 +27,15 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
             }
             */
 
+            // 捕获 thoughtSignature (Gemini 3 工具调用必需)
+            if let Some(sig) = part
+                .get("thoughtSignature")
+                .or(part.get("thought_signature"))
+                .and_then(|s| s.as_str())
+            {
+                super::streaming::store_thought_signature(sig);
+            }
+
             // 文本部分
             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                 content_out.push_str(text);
@@ -126,26 +135,25 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         })
         .unwrap_or("stop");
 
-    // Extract usage metadata
-    let usage = raw.get("usageMetadata").map(|u| {
-        let prompt_tokens = u
-            .get("promptTokenCount")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        let completion_tokens = u
-            .get("candidatesTokenCount")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        let total_tokens = u
-            .get("totalTokenCount")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
-        OpenAIUsage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-        }
-    });
+    // 提取 Token 使用量 (Gemini 2.0+ 使用 usageMetadata)
+    let usage = raw
+        .get("usageMetadata")
+        .map(|u| {
+            let p = u
+                .get("promptTokenCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            let c = u
+                .get("candidatesTokenCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            OpenAIUsage {
+                prompt_tokens: p,
+                completion_tokens: c,
+                total_tokens: p + c,
+            }
+        })
+        .unwrap_or_default();
 
     OpenAIResponse {
         id: raw

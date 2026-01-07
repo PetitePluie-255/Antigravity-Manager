@@ -91,6 +91,17 @@ async fn main() {
             "/v1/completions",
             post(handlers::openai::handle_completions),
         )
+        // OpenAI Responses (Codex) - for /v1/responses endpoint
+        .route("/v1/responses", post(handlers::openai::handle_completions))
+        // OpenAI Images API (merged from main)
+        .route(
+            "/v1/images/generations",
+            post(handlers::openai::handle_images_generations),
+        )
+        .route(
+            "/v1/images/edits",
+            post(handlers::openai::handle_images_edits),
+        )
         .route("/v1/models", get(handlers::openai::handle_list_models))
         // Claude
         .route("/v1/messages", post(handlers::claude::handle_messages))
@@ -98,6 +109,25 @@ async fn main() {
         .route(
             "/v1beta/models/:model",
             post(handlers::gemini::handle_generate).get(handlers::gemini::handle_get_model),
+        )
+        // z.ai MCP routes
+        .route(
+            "/mcp/web-search",
+            post(handlers::mcp::handle_web_search_prime)
+                .get(handlers::mcp::handle_web_search_prime)
+                .delete(handlers::mcp::handle_web_search_prime),
+        )
+        .route(
+            "/mcp/web-reader",
+            post(handlers::mcp::handle_web_reader)
+                .get(handlers::mcp::handle_web_reader)
+                .delete(handlers::mcp::handle_web_reader),
+        )
+        .route(
+            "/mcp/zai-vision",
+            post(handlers::mcp::handle_zai_mcp_server)
+                .get(handlers::mcp::handle_zai_mcp_server)
+                .delete(handlers::mcp::handle_zai_mcp_server),
         )
         // Compatibility Aliases
         .route(

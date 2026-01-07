@@ -51,7 +51,7 @@ pub async fn start_proxy(
         url: config.upstream_proxy.url.clone(),
     };
     *state.upstream_proxy.write().await = upstream_cfg.clone();
-    state.upstream.update_config(upstream_cfg).await;
+    // Note: UpstreamClient is recreated when proxy restarts, no update_config needed
 
     // Reload Tokens
     match state.token_manager.load_accounts().await {

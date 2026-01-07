@@ -42,8 +42,13 @@ pub async fn fetch_project_id(access_token: &str) -> Result<String, String> {
         return Ok(project_id.to_string());
     }
 
-    // 如果没有返回 project_id，说明账号无资格
-    Err("账号无资格获取 cloudaicompanionProject".to_string())
+    // 如果没有返回 project_id，说明账号无资格，使用内置随机生成逻辑作为兜底
+    let mock_id = generate_mock_project_id();
+    tracing::warn!(
+        "账号无资格获取官方 cloudaicompanionProject，将使用随机生成的 Project ID 作为兜底: {}",
+        mock_id
+    );
+    Ok(mock_id)
 }
 
 /// 生成随机 project_id（当无法从 API 获取时使用）

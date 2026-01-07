@@ -1,6 +1,6 @@
 // 模型名称映射
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use once_cell::sync::Lazy;
 
 static CLAUDE_TO_GEMINI: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut m = HashMap::new();
@@ -92,7 +92,7 @@ pub async fn get_all_dynamic_models(
         let mapping = openai_mapping.read().await;
         for key in mapping.keys() {
             if !key.ends_with("-series") {
-                model_ids.insert(key.clone());
+                 model_ids.insert(key.clone());
             }
         }
     }
@@ -117,12 +117,12 @@ pub async fn get_all_dynamic_models(
 
     // 5. 确保包含常用的 Gemini/画画模型 ID
     model_ids.insert("gemini-3-pro-low".to_string());
-
+    
     // [NEW] Issue #247: Dynamically generate all Image Gen Combinations
     let base = "gemini-3-pro-image";
     let resolutions = vec!["", "-2k", "-4k"];
     let ratios = vec!["", "-1x1", "-4x3", "-3x4", "-16x9", "-9x16", "-21x9"];
-
+    
     for res in resolutions {
         for ratio in ratios.iter() {
             let mut id = base.to_string();
@@ -139,6 +139,7 @@ pub async fn get_all_dynamic_models(
     model_ids.insert("gemini-3-pro-high".to_string());
     model_ids.insert("gemini-3-pro-low".to_string());
 
+
     let mut sorted_ids: Vec<_> = model_ids.into_iter().collect();
     sorted_ids.sort();
     sorted_ids
@@ -146,7 +147,7 @@ pub async fn get_all_dynamic_models(
 
 /// 核心模型路由解析引擎
 /// 优先级：Custom Mapping (精确) > Group Mapping (家族) > System Mapping (内置插件)
-///
+/// 
 /// # 参数
 /// - `apply_claude_family_mapping`: 是否对 Claude 模型应用家族映射
 ///   - `true`: CLI 请求，应用家族映射（如 claude-sonnet-4-5 -> gemini-3-pro-high）
@@ -160,11 +161,7 @@ pub fn resolve_model_route(
 ) -> String {
     // 1. 检查自定义精确映射 (优先级最高)
     if let Some(target) = custom_mapping.get(original_model) {
-        tracing::info!(
-            "[Router] 使用自定义精确映射: {} -> {}",
-            original_model,
-            target
-        );
+        crate::modules::logger::log_info(&format!("[Router] 使用自定义精确映射: {} -> {}", original_model, target));
         return target.clone();
     }
 
@@ -172,36 +169,18 @@ pub fn resolve_model_route(
 
     // 2. 检查家族分组映射 (OpenAI 系)
     // GPT-4 系列 (含 GPT-4 经典, o1, o3 等, 排除 4o/mini/turbo)
-    if (lower_model.starts_with("gpt-4")
-        && !lower_model.contains("o")
-        && !lower_model.contains("mini")
-        && !lower_model.contains("turbo"))
-        || lower_model.starts_with("o1-")
-        || lower_model.starts_with("o3-")
-        || lower_model == "gpt-4"
-    {
+    if (lower_model.starts_with("gpt-4") && !lower_model.contains("o") && !lower_model.contains("mini") && !lower_model.contains("turbo")) || 
+       lower_model.starts_with("o1-") || lower_model.starts_with("o3-") || lower_model == "gpt-4" {
         if let Some(target) = openai_mapping.get("gpt-4-series") {
-            tracing::info!(
-                "[Router] 使用 GPT-4 系列映射: {} -> {}",
-                original_model,
-                target
-            );
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
     }
-
+    
     // GPT-4o / 3.5 系列 (均衡与轻量, 含 4o, mini, turbo)
-    if lower_model.contains("4o")
-        || lower_model.starts_with("gpt-3.5")
-        || (lower_model.contains("mini") && !lower_model.contains("gemini"))
-        || lower_model.contains("turbo")
-    {
+    if lower_model.contains("4o") || lower_model.starts_with("gpt-3.5") || (lower_model.contains("mini") && !lower_model.contains("gemini")) || lower_model.contains("turbo") {
         if let Some(target) = openai_mapping.get("gpt-4o-series") {
-            tracing::info!(
-                "[Router] 使用 GPT-4o/3.5 系列映射: {} -> {}",
-                original_model,
-                target
-            );
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4o/3.5 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
     }
@@ -210,19 +189,11 @@ pub fn resolve_model_route(
     if lower_model.starts_with("gpt-5") {
         // 优先使用 gpt-5-series 映射，如果没有则使用 gpt-4-series
         if let Some(target) = openai_mapping.get("gpt-5-series") {
-            tracing::info!(
-                "[Router] 使用 GPT-5 系列映射: {} -> {}",
-                original_model,
-                target
-            );
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-5 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
         if let Some(target) = openai_mapping.get("gpt-4-series") {
-            tracing::info!(
-                "[Router] 使用 GPT-4 系列映射 (GPT-5 fallback): {} -> {}",
-                original_model,
-                target
-            );
+            crate::modules::logger::log_info(&format!("[Router] 使用 GPT-4 系列映射 (GPT-5 fallback): {} -> {}", original_model, target));
             return target.clone();
         }
     }
@@ -235,20 +206,17 @@ pub fn resolve_model_route(
             if let Some(mapped) = CLAUDE_TO_GEMINI.get(original_model) {
                 if *mapped == original_model {
                     // 原生支持的直通模型，跳过家族映射
-                    tracing::info!("[Router] 非 CLI 请求，跳过家族映射: {}", original_model);
+                    crate::modules::logger::log_info(&format!("[Router] 非 CLI 请求，跳过家族映射: {}", original_model));
                     return original_model.to_string();
                 }
             }
         }
-
+        
         // [NEW] Haiku 智能降级策略
         // 将所有 Haiku 模型自动降级到 gemini-2.5-flash-lite (最轻量/便宜的模型)
         // [FIX] 仅在 CLI 模式下生效 (apply_claude_family_mapping == true)
         if apply_claude_family_mapping && lower_model.contains("haiku") {
-            tracing::info!(
-                "[Router] Haiku 智能降级 (CLI): {} -> gemini-2.5-flash-lite",
-                original_model
-            );
+            crate::modules::logger::log_info(&format!("[Router] Haiku 智能降级 (CLI): {} -> gemini-2.5-flash-lite", original_model));
             return "gemini-2.5-flash-lite".to_string();
         }
 
@@ -261,17 +229,13 @@ pub fn resolve_model_route(
         };
 
         if let Some(target) = anthropic_mapping.get(family_key) {
-            tracing::warn!(
-                "[Router] 使用 Anthropic 系列映射: {} -> {}",
-                original_model,
-                target
-            );
+            crate::modules::logger::log_warn(&format!("[Router] 使用 Anthropic 系列映射: {} -> {}", original_model, target));
             return target.clone();
         }
-
+        
         // 兜底兼容旧版精确映射
         if let Some(target) = anthropic_mapping.get(original_model) {
-            return target.clone();
+             return target.clone();
         }
     }
 

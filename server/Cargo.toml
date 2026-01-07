@@ -24,7 +24,7 @@ thiserror = "2.0.17"
 clap = { version = "4.4", features = ["derive", "env"] }
 
 # Web Server
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 eventsource-stream = "0.2"
@@ -38,3 +38,5 @@ once_cell = "1.19"
 pin-project = "1.1"
 bytes = "1.5"
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+sha2 = "0.10"

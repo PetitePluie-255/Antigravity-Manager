@@ -210,6 +210,8 @@ function Settings() {
               <h2 className="text-lg font-semibold text-gray-900 dark:text-base-content">
                 {t("settings.tabs.proxy")}
               </h2>
+
+              {/* 上游代理配置 */}
               <div className="p-4 bg-gray-50 dark:bg-base-200 rounded-lg border border-gray-100 dark:border-base-300">
                 <h3 className="text-md font-semibold text-gray-900 dark:text-base-content mb-3 flex items-center gap-2">
                   <Sparkles size={18} className="text-blue-500" />
@@ -264,9 +266,196 @@ function Settings() {
                       placeholder={t(
                         "proxy.config.upstream_proxy.url_placeholder"
                       )}
-                      className="w-full px-4 py-4 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
+                      className="w-full px-4 py-3 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* z.ai 配置 */}
+              <div className="p-4 bg-gray-50 dark:bg-base-200 rounded-lg border border-gray-100 dark:border-base-300">
+                <h3 className="text-md font-semibold text-gray-900 dark:text-base-content mb-3 flex items-center gap-2">
+                  <Sparkles size={18} className="text-purple-500" />
+                  z.ai 配置
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex items-center">
+                    <label className="flex items-center cursor-pointer gap-3">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-sm checkbox-primary"
+                        checked={formData.proxy?.zai?.enabled || false}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            proxy: {
+                              ...formData.proxy,
+                              zai: {
+                                ...formData.proxy.zai,
+                                enabled: e.target.checked,
+                              },
+                            },
+                          })
+                        }
+                      />
+                      <span className="text-sm font-medium text-gray-900 dark:text-base-content">
+                        启用 z.ai
+                      </span>
+                    </label>
+                  </div>
+
+                  {formData.proxy?.zai?.enabled && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={formData.proxy?.zai?.api_key || ""}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              proxy: {
+                                ...formData.proxy,
+                                zai: {
+                                  ...formData.proxy.zai,
+                                  api_key: e.target.value,
+                                },
+                              },
+                            })
+                          }
+                          placeholder="输入 z.ai API Key"
+                          className="w-full px-4 py-3 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          调度模式
+                        </label>
+                        <select
+                          value={formData.proxy?.zai?.dispatch_mode || "off"}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              proxy: {
+                                ...formData.proxy,
+                                zai: {
+                                  ...formData.proxy.zai,
+                                  dispatch_mode: e.target.value,
+                                },
+                              },
+                            })
+                          }
+                          className="w-full px-4 py-3 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
+                        >
+                          <option value="off">关闭</option>
+                          <option value="exclusive">
+                            独占模式 (仅使用 z.ai)
+                          </option>
+                          <option value="pooled">
+                            池化模式 (与 Google 轮询)
+                          </option>
+                          <option value="fallback">
+                            回退模式 (Google 不可用时使用)
+                          </option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* 调度模式配置 */}
+              <div className="p-4 bg-gray-50 dark:bg-base-200 rounded-lg border border-gray-100 dark:border-base-300">
+                <h3 className="text-md font-semibold text-gray-900 dark:text-base-content mb-3 flex items-center gap-2">
+                  <Sparkles size={18} className="text-green-500" />
+                  账号调度模式
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      调度策略
+                    </label>
+                    <select
+                      value={formData.proxy?.scheduling?.mode || "balance"}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          proxy: {
+                            ...formData.proxy,
+                            scheduling: {
+                              ...formData.proxy.scheduling,
+                              mode: e.target.value,
+                            },
+                          },
+                        })
+                      }
+                      className="w-full px-4 py-3 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
+                    >
+                      <option value="cache_first">
+                        缓存优先 (最大化 Prompt Cache)
+                      </option>
+                      <option value="balance">平衡模式 (推荐)</option>
+                      <option value="performance_first">
+                        性能优先 (纯轮询)
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      最大等待时间 (秒)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="300"
+                      value={formData.proxy?.scheduling?.max_wait_seconds || 60}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          proxy: {
+                            ...formData.proxy,
+                            scheduling: {
+                              ...formData.proxy.scheduling,
+                              max_wait_seconds: parseInt(e.target.value) || 60,
+                            },
+                          },
+                        })
+                      }
+                      className="w-32 px-4 py-3 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 安全模式 */}
+              <div className="p-4 bg-gray-50 dark:bg-base-200 rounded-lg border border-gray-100 dark:border-base-300">
+                <h3 className="text-md font-semibold text-gray-900 dark:text-base-content mb-3 flex items-center gap-2">
+                  <Sparkles size={18} className="text-orange-500" />
+                  安全模式
+                </h3>
+                <div>
+                  <select
+                    value={formData.proxy?.auth_mode || "auto"}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        proxy: {
+                          ...formData.proxy,
+                          auth_mode: e.target.value,
+                        },
+                      })
+                    }
+                    className="w-full px-4 py-3 border border-gray-200 dark:border-base-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-base-content bg-gray-50 dark:bg-base-200"
+                  >
+                    <option value="auto">自动 (根据访问来源智能判断)</option>
+                    <option value="off">关闭 (不验证 API Key)</option>
+                    <option value="strict">
+                      严格模式 (所有请求都需要验证)
+                    </option>
+                    <option value="all_except_health">除健康检查外验证</option>
+                  </select>
                 </div>
               </div>
             </div>
