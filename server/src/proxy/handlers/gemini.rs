@@ -29,14 +29,6 @@ pub async fn handle_generate(
         (model_action, "generateContent".to_string())
     };
 
-    #[cfg(feature = "tauri-app")]
-    crate::modules::logger::log_info(&format!(
-        "Received Gemini request: {}/{}",
-        model_name, method
-    ));
-    #[cfg(not(feature = "tauri-app"))]
-    tracing::info!("Received Gemini request: {}/{}", model_name, method);
-
     // 1. 验证方法
     if method != "generateContent" && method != "streamGenerateContent" {
         return Err((
@@ -108,6 +100,8 @@ pub async fn handle_generate(
 
         // 5. 包装请求 (project injection)
         let wrapped_body = wrap_request(&body, &project_id, &mapped_model);
+        // Serialize request body before it's moved into call_v1_internal
+        let request_json_cached = serde_json::to_string(&wrapped_body).ok();
 
         // 5. 上游调用
         let query_string = if is_stream { Some("alt=sse") } else { None };
@@ -199,12 +193,29 @@ pub async fn handle_generate(
                     }
                 };
 
-                let body = Body::from_stream(stream);
+                // Log streaming request (token counts not available for streams)
+                let latency = start.elapsed().as_millis() as u32;
+
+                let response_body = Body::from_stream(stream);
+                state.log_store.record(
+                    "POST".to_string(),
+                    format!("/v1beta/models/{}:streamGenerateContent", model_name),
+                    email.clone(),
+                    model_name.clone(),
+                    0, // tokens_in not available for stream
+                    0, // tokens_out not available for stream
+                    latency,
+                    200,
+                    None,
+                    request_json_cached,
+                    Some("[Stream Data]".to_string()),
+                );
+
                 return Ok(Response::builder()
                     .header("Content-Type", "text/event-stream")
                     .header("Cache-Control", "no-cache")
                     .header("Connection", "keep-alive")
-                    .body(body)
+                    .body(response_body)
                     .unwrap()
                     .into_response());
             }
@@ -226,7 +237,12 @@ pub async fn handle_generate(
                 .unwrap_or(0) as u32;
             let latency = start.elapsed().as_millis() as u32;
 
+            // Use cached request JSON
+            let response_json = serde_json::to_string(&gemini_resp).ok();
+
             state.log_store.record(
+                "POST".to_string(),
+                format!("/v1beta/models/{}:generateContent", model_name),
                 email.clone(),
                 model_name.clone(),
                 prompt_tokens,
@@ -234,6 +250,8 @@ pub async fn handle_generate(
                 latency,
                 200,
                 None,
+                request_json_cached,
+                response_json,
             );
 
             let unwrapped = unwrap_response(&gemini_resp);

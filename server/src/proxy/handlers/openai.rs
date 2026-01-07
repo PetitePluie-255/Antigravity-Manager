@@ -138,6 +138,23 @@ pub async fn handle_chat_completions(
                     create_openai_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
                 let body = Body::from_stream(openai_stream);
 
+                // Log streaming request (token counts not available for streams)
+                let request_json = serde_json::to_string(&openai_req).ok();
+                let latency = start.elapsed().as_millis() as u32;
+                state.log_store.record(
+                    "POST".to_string(),
+                    "/v1/chat/completions".to_string(),
+                    email.clone(),
+                    openai_req.model.clone(),
+                    0, // tokens_in not available for stream
+                    0, // tokens_out not available for stream
+                    latency,
+                    200,
+                    None,
+                    request_json,
+                    Some("[Stream Data]".to_string()),
+                );
+
                 return Ok(Response::builder()
                     .header("Content-Type", "text/event-stream")
                     .header("Cache-Control", "no-cache")
@@ -161,7 +178,13 @@ pub async fn handle_chat_completions(
                 (0, 0)
             };
 
+            // Serialize request for logging (truncated for large payloads)
+            let request_json = serde_json::to_string(&openai_req).ok();
+            let response_json = serde_json::to_string(&openai_response).ok();
+
             state.log_store.record(
+                "POST".to_string(),
+                "/v1/chat/completions".to_string(),
                 email.clone(),
                 openai_req.model.clone(),
                 prompt_tokens,
@@ -169,6 +192,8 @@ pub async fn handle_chat_completions(
                 latency,
                 200,
                 None,
+                request_json,
+                response_json,
             );
 
             return Ok(Json(openai_response).into_response());
@@ -639,7 +664,13 @@ pub async fn handle_completions(
                 (0, 0)
             };
 
+            // Serialize request for logging
+            let request_json = serde_json::to_string(&openai_req).ok();
+            let response_json = serde_json::to_string(&chat_resp).ok();
+
             state.log_store.record(
+                "POST".to_string(),
+                "/v1/completions".to_string(),
                 email.clone(),
                 openai_req.model.clone(),
                 prompt_tokens,
@@ -647,6 +678,8 @@ pub async fn handle_completions(
                 latency,
                 200,
                 None,
+                request_json,
+                response_json,
             );
 
             // Map Chat Response -> Legacy Completions Response

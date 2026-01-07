@@ -419,7 +419,13 @@ pub async fn handle_messages(
                     claude_response.usage.output_tokens
                 );
 
+                // Serialize request for logging
+                let request_json = serde_json::to_string(&request).ok();
+                let response_json = serde_json::to_string(&claude_response).ok();
+
                 state.log_store.record(
+                    "POST".to_string(),
+                    "/v1/messages".to_string(),
                     email.clone(),
                     request.model.clone(),
                     claude_response.usage.input_tokens as u32,
@@ -427,6 +433,8 @@ pub async fn handle_messages(
                     start.elapsed().as_millis() as u32,
                     200,
                     None,
+                    request_json,
+                    response_json,
                 );
 
                 return Json(claude_response).into_response();

@@ -11,6 +11,8 @@ use std::sync::RwLock;
 pub struct ProxyLogEntry {
     pub id: u64,
     pub timestamp: i64,
+    pub method: String,
+    pub url: String,
     pub account_email: String,
     pub model: String,
     pub tokens_in: u32,
@@ -18,6 +20,8 @@ pub struct ProxyLogEntry {
     pub latency_ms: u32,
     pub status_code: u16,
     pub error: Option<String>,
+    pub request_body: Option<String>,
+    pub response_body: Option<String>,
 }
 
 /// 日志存储（环形缓冲区）
@@ -40,6 +44,8 @@ impl LogStore {
     /// 记录一条日志
     pub fn record(
         &self,
+        method: String,
+        url: String,
         account_email: String,
         model: String,
         tokens_in: u32,
@@ -47,10 +53,14 @@ impl LogStore {
         latency_ms: u32,
         status_code: u16,
         error: Option<String>,
+        request_body: Option<String>,
+        response_body: Option<String>,
     ) {
         let entry = ProxyLogEntry {
             id: self.next_id.fetch_add(1, Ordering::SeqCst),
             timestamp: chrono::Utc::now().timestamp(),
+            method,
+            url,
             account_email,
             model,
             tokens_in,
@@ -58,6 +68,8 @@ impl LogStore {
             latency_ms,
             status_code,
             error,
+            request_body,
+            response_body,
         };
 
         let mut logs = self.logs.write().unwrap();
