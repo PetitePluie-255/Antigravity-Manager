@@ -1,14 +1,14 @@
 use axum::{
-    extract::{State, Json},
+    extract::{Json, State},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::state::AppState;
-use crate::core::services::AccountService;
+use super::common::{into_response, ApiResponse};
 use crate::core::models::TokenData;
-use super::common::{ApiResponse, into_response};
+use crate::core::services::AccountService;
+use crate::state::AppState;
 
 #[derive(Serialize)]
 pub struct ImportResult {
@@ -65,26 +65,30 @@ pub async fn import_accounts_json(
 async fn process_import(state: &AppState, acc: ImportAccount) -> Result<(), String> {
     let (token_data, actual_email) = get_token_info(&acc.refresh_token).await?;
     let final_email = acc.email.unwrap_or(actual_email);
-    
+
     AccountService::add_account(
-        &state.storage,
+        &state.db_pool,
         &state.emitter,
         final_email,
         acc.name,
-        token_data
-    ).map(|_| ())
+        token_data,
+    )
+    .await
+    .map(|_| ())
 }
 
 async fn get_token_info(refresh_token: &str) -> Result<(TokenData, String), String> {
-     let token_response = crate::core::services::oauth::refresh_access_token(refresh_token).await?;
-    let user_info = crate::core::services::oauth::get_user_info(&token_response.access_token).await?;
-    
+    let token_response = crate::core::services::oauth::refresh_access_token(refresh_token).await?;
+    let user_info =
+        crate::core::services::oauth::get_user_info(&token_response.access_token).await?;
+
     let token_data = TokenData::new(
         token_response.access_token,
         refresh_token.to_string(),
         token_response.expires_in,
         Some(user_info.email.clone()),
-        None, None
+        None,
+        None,
     );
     Ok((token_data, user_info.email))
 }

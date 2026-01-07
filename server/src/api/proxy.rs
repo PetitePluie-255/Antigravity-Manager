@@ -108,7 +108,7 @@ pub async fn update_model_mapping(
     use crate::core::storage::ConfigStorage;
     use crate::core::traits::StorageConfig;
 
-    match ConfigStorage::load(&state.storage) {
+    match ConfigStorage::load(&state.db_pool, &state.storage).await {
         Ok(mut config) => {
             // Update in-memory state as well if running
             if state.proxy_enabled.load(Ordering::Relaxed) {
@@ -121,7 +121,7 @@ pub async fn update_model_mapping(
             config.proxy.openai_mapping = proxy_config.openai_mapping;
             config.proxy.custom_mapping = proxy_config.custom_mapping;
 
-            into_response(ConfigStorage::save(&state.storage, &config))
+            into_response(ConfigStorage::save(&state.db_pool, &config).await)
         }
         Err(e) => ApiResponse::err(format!("加载配置失败: {}", e)).into_response(),
     }

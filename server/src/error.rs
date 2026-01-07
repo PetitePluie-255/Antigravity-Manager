@@ -12,10 +12,6 @@ pub enum AppError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[cfg(feature = "tauri-app")]
-    #[error("Tauri error: {0}")]
-    Tauri(#[from] tauri::Error),
-
     #[error("OAuth error: {0}")]
     OAuth(String),
 

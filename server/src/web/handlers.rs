@@ -65,7 +65,7 @@ pub struct BatchDeleteRequest {
 
 /// 列出所有账户
 pub async fn list_accounts(State(state): State<Arc<WebAppState>>) -> Response {
-    match AccountService::list_accounts(&state.storage) {
+    match AccountService::list_accounts(&state.db_pool).await {
         Ok(accounts) => ApiResponse::ok(accounts).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -87,12 +87,14 @@ pub async fn add_account(
             };
 
             match AccountService::add_account(
-                &state.storage,
+                &state.db_pool,
                 &state.emitter,
                 final_email,
                 req.name,
                 token_data,
-            ) {
+            )
+            .await
+            {
                 Ok(account) => ApiResponse::ok(account).into_response(),
                 Err(e) => ApiResponse::err(e).into_response(),
             }
@@ -106,7 +108,7 @@ pub async fn delete_account(
     State(state): State<Arc<WebAppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    match AccountService::delete_account(&state.storage, &state.emitter, &id) {
+    match AccountService::delete_account(&state.db_pool, &state.emitter, &id).await {
         Ok(()) => ApiResponse::ok(()).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -117,7 +119,7 @@ pub async fn delete_accounts(
     State(state): State<Arc<WebAppState>>,
     Json(req): Json<BatchDeleteRequest>,
 ) -> Response {
-    match AccountService::delete_accounts(&state.storage, &state.emitter, &req.account_ids) {
+    match AccountService::delete_accounts(&state.db_pool, &state.emitter, &req.account_ids).await {
         Ok(()) => ApiResponse::ok(()).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -125,7 +127,7 @@ pub async fn delete_accounts(
 
 /// 获取当前账户
 pub async fn get_current_account(State(state): State<Arc<WebAppState>>) -> Response {
-    match AccountService::get_current_account(&state.storage) {
+    match AccountService::get_current_account(&state.db_pool).await {
         Ok(account) => ApiResponse::ok(account).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -136,7 +138,7 @@ pub async fn switch_account(
     State(state): State<Arc<WebAppState>>,
     Json(req): Json<SwitchAccountRequest>,
 ) -> Response {
-    match AccountService::switch_account(&state.storage, &state.emitter, &req.account_id) {
+    match AccountService::switch_account(&state.db_pool, &state.emitter, &req.account_id).await {
         Ok(()) => ApiResponse::ok(()).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -147,7 +149,7 @@ pub async fn get_account_quota(
     State(state): State<Arc<WebAppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    match AccountService::load_account(&state.storage, &id) {
+    match AccountService::load_account(&state.db_pool, &id).await {
         Ok(account) => ApiResponse::ok(account.quota).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -158,7 +160,7 @@ pub async fn refresh_account_quota(
     State(state): State<Arc<WebAppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    match QuotaService::refresh_account_quota(&state.storage, &id).await {
+    match QuotaService::refresh_account_quota(&state.db_pool, &id).await {
         Ok(quota) => ApiResponse::ok(quota).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -166,7 +168,7 @@ pub async fn refresh_account_quota(
 
 /// 刷新所有账户配额
 pub async fn refresh_all_quotas(State(state): State<Arc<WebAppState>>) -> Response {
-    match QuotaService::refresh_all_quotas(&state.storage).await {
+    match QuotaService::refresh_all_quotas(&state.db_pool).await {
         Ok((success, errors)) => ApiResponse::ok(serde_json::json!({
             "success_count": success,
             "error_count": errors
@@ -178,7 +180,7 @@ pub async fn refresh_all_quotas(State(state): State<Arc<WebAppState>>) -> Respon
 
 /// 导出账户
 pub async fn export_accounts(State(state): State<Arc<WebAppState>>) -> Response {
-    match AccountService::export_accounts(&state.storage) {
+    match AccountService::export_accounts(&state.db_pool).await {
         Ok(tokens) => ApiResponse::ok(tokens).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -188,7 +190,7 @@ pub async fn export_accounts(State(state): State<Arc<WebAppState>>) -> Response 
 
 /// 加载配置
 pub async fn load_config(State(state): State<Arc<WebAppState>>) -> Response {
-    match ConfigStorage::load(&state.storage) {
+    match ConfigStorage::load(&state.db_pool, &state.storage).await {
         Ok(config) => ApiResponse::ok(config).into_response(),
         Err(e) => ApiResponse::err(e).into_response(),
     }
@@ -250,7 +252,7 @@ pub async fn update_model_mapping(
     Json(proxy_config): Json<ProxyConfig>,
 ) -> Response {
     // 加载现有配置
-    match ConfigStorage::load(&state.storage) {
+    match ConfigStorage::load(&state.db_pool, &state.storage).await {
         Ok(mut config) => {
             // 更新模型映射相关字段
             config.proxy.anthropic_mapping = proxy_config.anthropic_mapping;
@@ -712,12 +714,14 @@ async fn do_import_accounts(state: &WebAppState, accounts: Vec<ImportAccount>) -
 
                 // 使用 AccountService 添加账号
                 match AccountService::add_account(
-                    &state.storage,
+                    &state.db_pool,
                     &state.emitter,
                     final_email.clone(),
                     acc.name.clone(),
                     token_data,
-                ) {
+                )
+                .await
+                {
                     Ok(_) => result.success += 1,
                     Err(e) => {
                         result.failed += 1;
@@ -783,7 +787,6 @@ pub struct ImportDatabaseRequest {
 }
 
 /// 从数据库导入账号
-#[cfg(feature = "web-server")]
 pub async fn import_from_database(
     State(state): State<Arc<WebAppState>>,
     Json(req): Json<ImportDatabaseRequest>,
@@ -853,14 +856,14 @@ pub async fn get_proxy_logs(
     State(state): State<Arc<WebAppState>>,
     Query(params): Query<LogQueryParams>,
 ) -> Response {
-    let logs = state.log_store.get_logs(params.limit, params.offset);
-    let total = state.log_store.len();
+    let logs = state.log_store.get_logs(params.limit, params.offset).await;
+    let total = state.log_store.len().await;
 
     ApiResponse::ok(LogQueryResponse { logs, total }).into_response()
 }
 
 /// 清除代理日志
 pub async fn clear_proxy_logs(State(state): State<Arc<WebAppState>>) -> Response {
-    state.log_store.clear();
+    state.log_store.clear().await;
     ApiResponse::ok("日志已清除").into_response()
 }

@@ -3,9 +3,9 @@
 
 use crate::core::models::{Account, QuotaData};
 use crate::core::services::AccountService;
-use crate::core::traits::StorageConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::SqlitePool;
 
 const QUOTA_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 const LOAD_PROJECT_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
@@ -189,103 +189,32 @@ impl QuotaService {
         Err(last_error.unwrap_or_else(|| "配额查询失败".to_string()))
     }
 
-    /// 通过 access_token 和 project_id 查询配额
-    /// 用于后台刷新任务，不需要完整的 Account 对象
-    pub async fn fetch_quota_by_token(
-        access_token: &str,
-        project_id: Option<&str>,
-    ) -> Result<QuotaData, String> {
-        let client = Self::create_client();
-
-        // 如果没有 project_id，尝试获取
-        let pid = if let Some(p) = project_id {
-            Some(p.to_string())
-        } else {
-            Self::fetch_project_id(access_token).await
-        };
-
-        // 构建请求体
-        let mut payload = serde_json::Map::new();
-        if let Some(p) = pid {
-            payload.insert("project".to_string(), json!(p));
-        }
-
-        // 发送请求
-        let response = client
-            .post(QUOTA_API_URL)
-            .bearer_auth(access_token)
-            .header("User-Agent", USER_AGENT)
-            .json(&json!(payload))
-            .send()
-            .await
-            .map_err(|e| format!("请求失败: {}", e))?;
-
-        let status = response.status();
-
-        if !status.is_success() {
-            if status.as_u16() == 403 {
-                let mut q = QuotaData::new();
-                q.is_forbidden = true;
-                return Ok(q);
-            }
-            let text = response.text().await.unwrap_or_default();
-            return Err(format!("API 错误: {} - {}", status, text));
-        }
-
-        // 解析响应
-        let quota_response: QuotaResponse = response
-            .json()
-            .await
-            .map_err(|e| format!("解析配额响应失败: {}", e))?;
-
-        let mut quota_data = QuotaData::new();
-
-        for (name, info) in quota_response.models {
-            if let Some(quota_info) = info.quota_info {
-                let percentage = quota_info
-                    .remaining_fraction
-                    .map(|f| (f * 100.0) as i32)
-                    .unwrap_or(0);
-
-                let reset_time = quota_info.reset_time.unwrap_or_default();
-
-                if name.contains("gemini") || name.contains("claude") {
-                    quota_data.add_model(name, percentage, reset_time);
-                }
-            }
-        }
-
-        Ok(quota_data)
-    }
-
     /// 刷新账户配额并保存
-    pub async fn refresh_account_quota<S: StorageConfig>(
-        storage: &S,
+    pub async fn refresh_account_quota(
+        pool: &SqlitePool,
         account_id: &str,
     ) -> Result<QuotaData, String> {
         // 加载账户
-        let account = AccountService::load_account(storage, account_id)?;
+        let account = AccountService::load_account(pool, account_id).await?;
 
         // 查询配额
         let quota = Self::fetch_quota(&account).await?;
 
         // 保存配额
-        AccountService::update_account_quota(storage, account_id, quota.clone())?;
+        AccountService::update_account_quota(pool, account_id, quota.clone()).await?;
 
         Ok(quota)
     }
 
     /// 刷新所有账户配额
-    pub async fn refresh_all_quotas<S: StorageConfig>(
-        storage: &S,
-    ) -> Result<(usize, usize), String> {
-        let accounts = AccountService::list_accounts(storage)?;
+    pub async fn refresh_all_quotas(pool: &SqlitePool) -> Result<(usize, usize), String> {
+        let accounts = AccountService::list_accounts(pool).await?;
 
         let mut success_count = 0;
         let mut error_count = 0;
 
         for account in accounts {
-            match Self::refresh_account_quota(storage, &account.id).await {
+            match Self::refresh_account_quota(pool, &account.id).await {
                 Ok(_) => success_count += 1,
                 Err(e) => {
                     tracing::warn!("刷新账户 {} 配额失败: {}", account.email, e);

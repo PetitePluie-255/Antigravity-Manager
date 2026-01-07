@@ -60,11 +60,9 @@ pub fn build_routes(state: Arc<WebAppState>) -> Router {
         )
         .route("/api/logs/clear", post(handlers::clear_log_cache))
         // 健康检查
-        .route("/healthz", get(handlers::health_check));
-
-    // 数据库导入仅在 web-server 模式可用
-    #[cfg(feature = "web-server")]
-    let router = router.route("/api/import/database", post(handlers::import_from_database));
+        .route("/healthz", get(handlers::health_check))
+        // 数据库导入
+        .route("/api/import/database", post(handlers::import_from_database));
 
     router.with_state(state)
 }

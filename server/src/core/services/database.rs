@@ -49,7 +49,6 @@ pub struct DatabaseImporter;
 
 impl DatabaseImporter {
     /// 从 PostgreSQL 导入账号
-    #[cfg(feature = "web-server")]
     pub async fn import_from_postgres(
         url: &str,
         config: &ImportConfig,
@@ -95,7 +94,6 @@ impl DatabaseImporter {
     }
 
     /// 从 SQLite 导入账号
-    #[cfg(feature = "web-server")]
     pub async fn import_from_sqlite(
         path: &str,
         config: &ImportConfig,
@@ -148,7 +146,6 @@ impl DatabaseImporter {
     }
 
     /// 根据 URL 自动选择数据库类型导入
-    #[cfg(feature = "web-server")]
     pub async fn import_from_url(
         url: &str,
         config: &ImportConfig,

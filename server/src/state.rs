@@ -53,6 +53,7 @@ pub struct AppState {
     pub provider_rr: Arc<std::sync::atomic::AtomicUsize>, // Round-robin counter for provider selection
     pub zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState,
     pub monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
+    pub db_pool: sqlx::SqlitePool,
 }
 
 impl AppState {
@@ -60,7 +61,9 @@ impl AppState {
         let storage = DefaultStorageConfig::new()?;
         // let proxy_manager = ProxyServiceManager::new(&storage);
 
-        let token_manager = Arc::new(TokenManager::new(storage.data_dir()));
+        let db_pool = crate::core::db::init_db(&storage.data_dir()).await?;
+
+        let token_manager = Arc::new(TokenManager::new(storage.data_dir(), db_pool.clone()));
         // Initialize other proxy fields with defaults
         let upstream_proxy = crate::proxy::config::UpstreamProxyConfig::default();
 
@@ -70,7 +73,7 @@ impl AppState {
             // proxy_manager,
             oauth_pending: RwLock::new(None),
             oauth_result: RwLock::new(OAuthResult::Pending),
-            log_store: Arc::new(crate::proxy::LogStore::default()),
+            log_store: Arc::new(crate::proxy::LogStore::new(db_pool.clone())),
 
             token_manager,
             anthropic_mapping: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -90,13 +93,16 @@ impl AppState {
             provider_rr: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new(),
             monitor: Arc::new(crate::proxy::monitor::ProxyMonitor::default()),
+            db_pool,
         })
     }
 
     pub async fn with_data_dir(data_dir: std::path::PathBuf) -> Result<Self, String> {
         let storage = DefaultStorageConfig::with_path(data_dir)?;
 
-        let token_manager = Arc::new(TokenManager::new(storage.data_dir()));
+        let db_pool = crate::core::db::init_db(&storage.data_dir()).await?;
+
+        let token_manager = Arc::new(TokenManager::new(storage.data_dir(), db_pool.clone()));
 
         // Initialize other proxy fields with defaults
         let upstream_proxy = crate::proxy::config::UpstreamProxyConfig::default();
@@ -107,7 +113,7 @@ impl AppState {
             // proxy_manager,
             oauth_pending: RwLock::new(None),
             oauth_result: RwLock::new(OAuthResult::Pending),
-            log_store: Arc::new(crate::proxy::LogStore::default()),
+            log_store: Arc::new(crate::proxy::LogStore::new(db_pool.clone())),
 
             token_manager,
             anthropic_mapping: Arc::new(RwLock::new(std::collections::HashMap::new())),
@@ -127,6 +133,7 @@ impl AppState {
             provider_rr: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new(),
             monitor: Arc::new(crate::proxy::monitor::ProxyMonitor::default()),
+            db_pool,
         })
     }
 }

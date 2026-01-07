@@ -24,13 +24,13 @@ pub async fn get_proxy_logs(
 ) -> Response {
     let limit = params.limit.unwrap_or(100);
     let offset = params.offset.unwrap_or(0);
-    let logs = state.log_store.get_logs(limit, offset);
-    let total = state.log_store.len();
+    let logs = state.log_store.get_logs(limit, offset).await;
+    let total = state.log_store.len().await;
 
     ApiResponse::ok(LogsResponse { logs, total }).into_response()
 }
 
 pub async fn clear_proxy_logs(State(state): State<Arc<AppState>>) -> Response {
-    state.log_store.clear();
+    state.log_store.clear().await;
     ApiResponse::ok(()).into_response()
 }

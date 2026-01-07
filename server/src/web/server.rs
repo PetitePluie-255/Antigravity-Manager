@@ -35,11 +35,13 @@ pub struct WebAppState {
     pub oauth_pending: RwLock<Option<PendingOAuth>>,
     pub oauth_result: RwLock<OAuthResult>,
     pub log_store: crate::proxy::LogStore,
+    pub db_pool: sqlx::SqlitePool,
 }
 
 impl WebAppState {
-    pub fn new() -> Result<Self, String> {
+    pub async fn new() -> Result<Self, String> {
         let storage = DefaultStorageConfig::new()?;
+        let db_pool = crate::core::db::init_db(&storage.data_dir()).await?;
         let proxy_manager = ProxyServiceManager::new(&storage);
         Ok(Self {
             storage,
@@ -47,13 +49,15 @@ impl WebAppState {
             proxy_manager,
             oauth_pending: RwLock::new(None),
             oauth_result: RwLock::new(OAuthResult::Pending),
-            log_store: crate::proxy::LogStore::default(),
+            log_store: crate::proxy::LogStore::new(db_pool.clone()),
+            db_pool,
         })
     }
 
     /// 从指定数据目录创建
-    pub fn with_data_dir(data_dir: std::path::PathBuf) -> Result<Self, String> {
+    pub async fn with_data_dir(data_dir: std::path::PathBuf) -> Result<Self, String> {
         let storage = DefaultStorageConfig::with_path(data_dir)?;
+        let db_pool = crate::core::db::init_db(&storage.data_dir()).await?;
         let proxy_manager = ProxyServiceManager::new(&storage);
         Ok(Self {
             storage,
@@ -61,7 +65,8 @@ impl WebAppState {
             proxy_manager,
             oauth_pending: RwLock::new(None),
             oauth_result: RwLock::new(OAuthResult::Pending),
-            log_store: crate::proxy::LogStore::default(),
+            log_store: crate::proxy::LogStore::new(db_pool.clone()),
+            db_pool,
         })
     }
 }
@@ -75,8 +80,8 @@ pub struct WebServer {
 
 impl WebServer {
     /// 创建新的 Web 服务器
-    pub fn new(port: u16) -> Result<Self, String> {
-        let state = Arc::new(WebAppState::new()?);
+    pub async fn new(port: u16) -> Result<Self, String> {
+        let state = Arc::new(WebAppState::new().await?);
         let static_dir = std::env::var("STATIC_DIR")
             .or_else(|_| std::env::var("STATIC_PATH"))
             .ok()
@@ -89,8 +94,8 @@ impl WebServer {
     }
 
     /// 从指定数据目录创建
-    pub fn with_data_dir(port: u16, data_dir: std::path::PathBuf) -> Result<Self, String> {
-        let state = Arc::new(WebAppState::with_data_dir(data_dir)?);
+    pub async fn with_data_dir(port: u16, data_dir: std::path::PathBuf) -> Result<Self, String> {
+        let state = Arc::new(WebAppState::with_data_dir(data_dir).await?);
         let static_dir = std::env::var("STATIC_DIR")
             .or_else(|_| std::env::var("STATIC_PATH"))
             .ok()
