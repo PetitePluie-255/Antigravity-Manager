@@ -94,6 +94,7 @@ pub fn create_openai_sse_stream(
                                     let parts = candidate.and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array());
 
                                     let mut content_out = String::new();
+                                    let mut thought_out = String::new();
                                     
                                     if let Some(parts_list) = parts {
                                         for part in parts_list {
@@ -101,8 +102,9 @@ pub fn create_openai_sse_stream(
                                                 content_out.push_str(text);
                                             }
                                             // Capture thought (Thinking Models)
-                                            if let Some(_thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                 // content_out.push_str(thought_text);
+                                            // Capture thought (Thinking Models)
+                                            if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
+                                                 thought_out.push_str(thought_text);
                                             }
                                             // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                             if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
@@ -165,6 +167,29 @@ pub fn create_openai_sse_stream(
                                             "SAFETY" => "content_filter",
                                             _ => f,
                                         });
+
+                                    // [NEW] Yield Reasoning Chunk if present
+                                    if !thought_out.is_empty() {
+                                        let reasoning_chunk = json!({
+                                            "id": format!("chatcmpl-{}", Uuid::new_v4()),
+                                            "object": "chat.completion.chunk",
+                                            "created": Utc::now().timestamp(),
+                                            "model": model,
+                                            "choices": [
+                                                {
+                                                    "index": 0,
+                                                    "delta": {
+                                                        "role": "assistant",
+                                                        "content": null,
+                                                        "reasoning_content": thought_out
+                                                    },
+                                                    "finish_reason": null
+                                                }
+                                            ]
+                                        });
+                                        let sse_out = format!("data: {}\n\n", serde_json::to_string(&reasoning_chunk).unwrap_or_default());
+                                        yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                    }
 
                                     // Construct OpenAI SSE chunk
                                     let openai_chunk = json!({

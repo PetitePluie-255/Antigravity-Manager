@@ -5,6 +5,8 @@ pub mod models;
 pub mod request;
 pub mod response;
 pub mod streaming;
+pub mod thinking_utils; // [NEW] Thinking Utils
+
 pub mod utils;
 
 pub use models::*;
@@ -65,7 +67,12 @@ pub fn create_claude_sse_stream(
 }
 
 /// 处理单行 SSE 数据
-fn process_sse_line(line: &str, state: &mut StreamingState, trace_id: &str, email: &str) -> Option<Vec<Bytes>> {
+fn process_sse_line(
+    line: &str,
+    state: &mut StreamingState,
+    trace_id: &str,
+    email: &str,
+) -> Option<Vec<Bytes>> {
     if !line.starts_with("data: ") {
         return None;
     }
@@ -103,7 +110,8 @@ fn process_sse_line(line: &str, state: &mut StreamingState, trace_id: &str, emai
     if let Some(candidate) = raw_json.get("candidates").and_then(|c| c.get(0)) {
         if let Some(grounding) = candidate.get("groundingMetadata") {
             // 提取搜索词
-            if let Some(query) = grounding.get("webSearchQueries")
+            if let Some(query) = grounding
+                .get("webSearchQueries")
                 .and_then(|v| v.as_array())
                 .and_then(|arr| arr.get(0))
                 .and_then(|v| v.as_str())
@@ -114,7 +122,11 @@ fn process_sse_line(line: &str, state: &mut StreamingState, trace_id: &str, emai
             // 提取结果块
             if let Some(chunks_arr) = grounding.get("groundingChunks").and_then(|v| v.as_array()) {
                 state.grounding_chunks = Some(chunks_arr.clone());
-            } else if let Some(chunks_arr) = grounding.get("grounding_metadata").and_then(|m| m.get("groundingChunks")).and_then(|v| v.as_array()) {
+            } else if let Some(chunks_arr) = grounding
+                .get("grounding_metadata")
+                .and_then(|m| m.get("groundingChunks"))
+                .and_then(|v| v.as_array())
+            {
                 state.grounding_chunks = Some(chunks_arr.clone());
             }
         }
@@ -165,15 +177,17 @@ fn process_sse_line(line: &str, state: &mut StreamingState, trace_id: &str, emai
             } else {
                 String::new()
             };
-            
-             tracing::info!(
-                 "[{}] ✓ Stream completed | Account: {} | In: {} tokens | Out: {} tokens{}", 
-                 trace_id,
-                 email,
-                 u.prompt_token_count.unwrap_or(0).saturating_sub(cached_tokens), 
-                 u.candidates_token_count.unwrap_or(0),
-                 cache_info
-             );
+
+            tracing::info!(
+                "[{}] ✓ Stream completed | Account: {} | In: {} tokens | Out: {} tokens{}",
+                trace_id,
+                email,
+                u.prompt_token_count
+                    .unwrap_or(0)
+                    .saturating_sub(cached_tokens),
+                u.candidates_token_count.unwrap_or(0),
+                cache_info
+            );
         }
 
         chunks.extend(state.emit_finish(Some(finish_reason), usage.as_ref()));
@@ -346,7 +360,7 @@ mod tests {
         let mut state = StreamingState::new();
 
         let test_data = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}],"usageMetadata":{},"modelVersion":"test","responseId":"123"}"#;
-        
+
         let result = process_sse_line(test_data, &mut state, "test_id", "test@example.com");
         assert!(result.is_some());
 
