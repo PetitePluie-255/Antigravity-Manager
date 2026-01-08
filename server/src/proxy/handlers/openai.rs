@@ -132,25 +132,24 @@ pub async fn handle_chat_completions(
                 // Removed redundant StreamExt
 
                 let gemini_stream = response.bytes_stream();
-                let openai_stream =
-                    create_openai_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
-                let body = Body::from_stream(openai_stream);
-
-                // Record streaming request to log store
                 let request_json = serde_json::to_string(&openai_req).ok();
-                state.log_store.record(
-                    "POST".to_string(),
-                    "/v1/chat/completions".to_string(),
-                    email.clone(),
-                    openai_req.model.clone(),
-                    0, // tokens_in not available for stream
-                    0, // tokens_out not available for stream
-                    start_time.elapsed().as_millis() as u32,
-                    200,
-                    None,
+
+                // Create log context for stream completion logging
+                let log_ctx = crate::proxy::mappers::openai::streaming::StreamLogContext {
+                    log_store: state.log_store.clone(),
+                    email: email.clone(),
+                    model: openai_req.model.clone(),
+                    endpoint: "/v1/chat/completions".to_string(),
                     request_json,
-                    Some("[Stream Data]".to_string()),
+                    start_time,
+                };
+
+                let openai_stream = create_openai_sse_stream(
+                    Box::pin(gemini_stream),
+                    openai_req.model.clone(),
+                    Some(log_ctx),
                 );
+                let body = Body::from_stream(openai_stream);
 
                 return Ok(Response::builder()
                     .header("Content-Type", "text/event-stream")
