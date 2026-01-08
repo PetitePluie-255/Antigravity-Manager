@@ -198,12 +198,13 @@ impl TokenManager {
     }
 
     /// 获取当前可用的 Token（支持粘性会话与智能调度）
+    /// 返回: (access_token, project_id, email, account_id)
     pub async fn get_token(
         &self,
         quota_group: &str,
         force_rotate: bool,
         session_id: Option<&str>,
-    ) -> Result<(String, String, String), String> {
+    ) -> Result<(String, String, String, String), String> {
         let mut tokens_snapshot: Vec<ProxyToken> =
             self.tokens.iter().map(|e| e.value().clone()).collect();
         let total = tokens_snapshot.len();
@@ -390,7 +391,12 @@ impl TokenManager {
                 }
             };
 
-            return Ok((token.access_token, project_id, token.email));
+            return Ok((
+                token.access_token,
+                project_id,
+                token.email,
+                token.account_id,
+            ));
         }
 
         Err(last_error.unwrap_or_else(|| "All accounts failed".to_string()))

@@ -86,7 +86,7 @@ pub async fn handle_generate(
         let session_id = SessionManager::extract_gemini_session_id(&body, &model_name);
 
         // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
-        let (access_token, project_id, email) = match token_manager
+        let (access_token, project_id, email, account_id) = match token_manager
             .get_token(&config.request_type, attempt > 0, Some(&session_id))
             .await
         {
@@ -284,7 +284,7 @@ pub async fn handle_generate(
         {
             // 记录限流信息 (全局同步)
             token_manager.mark_rate_limited(
-                &email,
+                &account_id,
                 status_code,
                 retry_after.as_deref(),
                 &error_text,
@@ -369,7 +369,7 @@ pub async fn handle_count_tokens(
     Json(_body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let model_group = "gemini";
-    let (_access_token, _project_id, _) = state
+    let (_access_token, _project_id, _, _account_id) = state
         .token_manager
         .get_token(model_group, false, None)
         .await

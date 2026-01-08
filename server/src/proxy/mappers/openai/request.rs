@@ -212,11 +212,24 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     let contents = merged_contents;
 
     // 3. 构建请求体
+    // [FIX PR #368] 检测 Gemini 3 Pro thinking 模型，注入 thinkingBudget 配置
+    let is_gemini_3_thinking = mapped_model.contains("gemini-3") && 
+        (mapped_model.ends_with("-high") || mapped_model.ends_with("-low") || mapped_model.contains("-pro"));
+
     let mut gen_config = json!({
         "maxOutputTokens": request.max_tokens.unwrap_or(64000),
         "temperature": request.temperature.unwrap_or(1.0),
         "topP": request.top_p.unwrap_or(1.0), 
     });
+
+    // [FIX PR #368] 为 Gemini 3 Pro 注入 thinkingConfig (使用 thinkingBudget 而非 thinkingLevel)
+    if is_gemini_3_thinking {
+        gen_config["thinkingConfig"] = json!({
+            "includeThoughts": true,
+            "thinkingBudget": 16000
+        });
+        tracing::debug!("[OpenAI-Request] Injected thinkingConfig for Gemini 3 Pro: thinkingBudget=16000");
+    }
 
     if let Some(stop) = &request.stop {
         if stop.is_string() { gen_config["stopSequences"] = json!([stop]); }
@@ -305,8 +318,28 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         }
     }
     
+    // [NEW] Antigravity 身份指令 (原始简化版)
+    let antigravity_identity = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.\n\
+    You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n\
+    **Absolute paths only**\n\
+    **Proactiveness**";
+
+    // [HYBRID] 检查用户是否已提供 Antigravity 身份
+    let user_has_antigravity = system_instructions.iter()
+        .any(|s| s.contains("You are Antigravity"));
+
     if !system_instructions.is_empty() {
-        inner_request["systemInstruction"] = json!({ "parts": [{"text": system_instructions.join("\n\n")}] });
+        if !user_has_antigravity {
+            // 用户有系统提示词但没有 Antigravity 身份,在前面添加
+            let combined = format!("{}\n\n{}", antigravity_identity, system_instructions.join("\n\n"));
+            inner_request["systemInstruction"] = json!({ "parts": [{"text": combined}] });
+        } else {
+            // 用户已提供 Antigravity 身份,直接使用
+            inner_request["systemInstruction"] = json!({ "parts": [{"text": system_instructions.join("\n\n")}] });
+        }
+    } else {
+        // 用户没有系统提示词,只注入 Antigravity 身份
+        inner_request["systemInstruction"] = json!({ "parts": [{"text": antigravity_identity}] });
     }
     
     if config.inject_google_search {

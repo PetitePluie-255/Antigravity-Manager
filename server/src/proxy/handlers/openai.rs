@@ -73,7 +73,7 @@ pub async fn handle_chat_completions(
 
         // 4. 获取 Token (使用准确的 request_type)
         // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
-        let (access_token, project_id, email) = match token_manager
+        let (access_token, project_id, email, account_id) = match token_manager
             .get_token(&config.request_type, attempt > 0, Some(&session_id))
             .await
         {
@@ -227,7 +227,7 @@ pub async fn handle_chat_completions(
         if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
             // 记录限流信息 (全局同步)
             token_manager.mark_rate_limited(
-                &email,
+                &account_id,
                 status_code,
                 retry_after.as_deref(),
                 &error_text,
@@ -602,7 +602,7 @@ pub async fn handle_completions(
             &tools_val,
         );
 
-        let (access_token, project_id, email) = match token_manager
+        let (access_token, project_id, email, _account_id) = match token_manager
             .get_token(&config.request_type, false, None)
             .await
         {
@@ -861,7 +861,7 @@ pub async fn handle_images_generations(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager.clone();
 
-    let (access_token, project_id, email) =
+    let (access_token, project_id, email, _account_id) =
         match token_manager.get_token("image_gen", false, None).await {
             Ok(t) => t,
             Err(e) => {
@@ -1111,7 +1111,7 @@ pub async fn handle_images_edits(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager.clone();
     // Fix: Proper get_token call with correct signature and unwrap (using image_gen quota)
-    let (access_token, project_id, _email) =
+    let (access_token, project_id, _email, _account_id) =
         match token_manager.get_token("image_gen", false, None).await {
             Ok(t) => t,
             Err(e) => {
