@@ -75,6 +75,10 @@ pub fn create_openai_sse_stream(
     let mut total_tokens_out: u32 = 0;
     let log_ctx_clone = log_ctx.clone();
 
+    // [FIX] Generate a single ID for the entire stream
+    let stream_id = format!("chatcmpl-{}", Uuid::new_v4());
+    let created_ts = Utc::now().timestamp();
+
     let stream = async_stream::stream! {
         while let Some(item) = gemini_stream.next().await {
             match item {
@@ -174,8 +178,9 @@ pub fn create_openai_sse_stream(
                                         }
                                     }
 
-                                    if content_out.is_empty() {
-                                        // Skip empty chunks if no text/grounding was found
+                                    // [FIX] Only skip if BOTH content and thought are empty
+                                    if content_out.is_empty() && thought_out.is_empty() {
+                                        // Skip empty chunks if no text/grounding/thought was found
                                         if candidate.and_then(|c| c.get("finishReason")).is_none() {
                                             continue;
                                         }
@@ -210,9 +215,9 @@ pub fn create_openai_sse_stream(
                                     // [NEW] Yield Reasoning Chunk if present
                                     if !thought_out.is_empty() {
                                         let reasoning_chunk = json!({
-                                            "id": format!("chatcmpl-{}", Uuid::new_v4()),
+                                            "id": &stream_id,
                                             "object": "chat.completion.chunk",
-                                            "created": Utc::now().timestamp(),
+                                            "created": created_ts,
                                             "model": model,
                                             "choices": [
                                                 {
@@ -231,24 +236,27 @@ pub fn create_openai_sse_stream(
                                     }
 
                                     // Construct OpenAI SSE chunk
-                                    let openai_chunk = json!({
-                                        "id": format!("chatcmpl-{}", Uuid::new_v4()),
-                                        "object": "chat.completion.chunk",
-                                        "created": Utc::now().timestamp(),
-                                        "model": model,
-                                        "choices": [
-                                            {
-                                                "index": 0,
-                                                "delta": {
-                                                    "content": content_out
-                                                },
-                                                "finish_reason": finish_reason
-                                            }
-                                        ]
-                                    });
+                                    // [FIX] Only yield openai_chunk if content is NOT empty OR finish_reason is present
+                                    if !content_out.is_empty() || finish_reason.is_some() {
+                                        let openai_chunk = json!({
+                                            "id": &stream_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [
+                                                {
+                                                    "index": 0,
+                                                    "delta": {
+                                                        "content": content_out
+                                                    },
+                                                    "finish_reason": finish_reason
+                                                }
+                                            ]
+                                        });
 
-                                    let sse_out = format!("data: {}\n\n", serde_json::to_string(&openai_chunk).unwrap_or_default());
-                                    yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                        let sse_out = format!("data: {}\n\n", serde_json::to_string(&openai_chunk).unwrap_or_default());
+                                        yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                    }
                                 }
                             }
                         }
