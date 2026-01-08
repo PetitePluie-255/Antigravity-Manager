@@ -258,9 +258,18 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
     crate::proxy::mappers::common_utils::deep_clean_undefined(&mut inner_request);
 
     // 4. Handle Tools (Merged Cleaning)
+    let mut has_web_search = false;  // [NEW] Track if we need to inject googleSearch
     if let Some(tools) = &request.tools {
         let mut function_declarations: Vec<Value> = Vec::new();
         for tool in tools.iter() {
+            // [NEW] Handle built-in web_search tool type (from /v1/responses API)
+            if let Some(tool_type) = tool.get("type").and_then(|v| v.as_str()) {
+                if tool_type == "web_search" {
+                    has_web_search = true;
+                    continue;  // Skip adding to functionDeclarations, will inject googleSearch later
+                }
+            }
+            
             let mut gemini_func = if let Some(func) = tool.get("function") {
                 func.clone()
             } else {
@@ -276,6 +285,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
             if let Some(name) = gemini_func.get("name").and_then(|v| v.as_str()) {
                 // 跳过内置联网工具名称，避免重复定义
                 if name == "web_search" || name == "google_search" || name == "web_search_20250305" {
+                    has_web_search = true;
                     continue;
                 }
                 
@@ -342,7 +352,8 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         inner_request["systemInstruction"] = json!({ "parts": [{"text": antigravity_identity}] });
     }
     
-    if config.inject_google_search {
+    // [MODIFIED] Inject googleSearch if config requires OR if we detected web_search tool
+    if config.inject_google_search || has_web_search {
         crate::proxy::mappers::common_utils::inject_google_search_tool(&mut inner_request);
     }
 

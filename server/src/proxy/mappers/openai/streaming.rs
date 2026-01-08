@@ -117,13 +117,17 @@ pub fn create_openai_sse_stream(
 
                                     if let Some(parts_list) = parts {
                                         for part in parts_list {
+                                            // [FIX] Gemini 3 Pro thinking: check if this part is a thought (thought: true)
+                                            let is_thought = part.get("thought")
+                                                .and_then(|t| t.as_bool())
+                                                .unwrap_or(false);
+
                                             if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                                                content_out.push_str(text);
-                                            }
-                                            // Capture thought (Thinking Models)
-                                            // Capture thought (Thinking Models)
-                                            if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                 thought_out.push_str(thought_text);
+                                                if is_thought {
+                                                    thought_out.push_str(text);
+                                                } else {
+                                                    content_out.push_str(text);
+                                                }
                                             }
                                             // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                             if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
