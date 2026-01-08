@@ -308,7 +308,7 @@ pub async fn handle_completions(
         body
     );
 
-    let is_codex_style = body.get("input").is_some() && body.get("instructions").is_some();
+    let is_codex_style = body.get("input").is_some() || body.get("instructions").is_some();
 
     // 1. Convert Payload to Messages (Shared Chat Format)
     if is_codex_style {
@@ -649,37 +649,31 @@ pub async fn handle_completions(
                 use axum::response::Response;
 
                 let gemini_stream = response.bytes_stream();
-                let body = if is_codex_style {
-                    use crate::proxy::mappers::openai::streaming::create_codex_sse_stream;
-                    let s =
-                        create_codex_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
-                    Body::from_stream(s)
-                } else {
-                    use crate::proxy::mappers::openai::streaming::create_legacy_sse_stream;
-                    let s =
-                        create_legacy_sse_stream(Box::pin(gemini_stream), openai_req.model.clone());
-                    Body::from_stream(s)
+                use crate::proxy::mappers::openai::streaming::{
+                    create_openai_sse_stream, StreamLogContext,
                 };
 
-                // Record streaming request to log store
-                let request_json = serde_json::to_string(&openai_req).ok();
-                state.log_store.record(
-                    "POST".to_string(),
-                    if is_codex_style {
+                // [FIX] Always use create_openai_sse_stream for best compatibility with Chat UIs (like LobeHub)
+                // that might call /v1/responses or /v1/completions but expect chat.completion.chunk format.
+                let log_ctx = StreamLogContext {
+                    log_store: state.log_store.clone(),
+                    email: email.clone(),
+                    model: openai_req.model.clone(),
+                    endpoint: if is_codex_style {
                         "/v1/responses".to_string()
                     } else {
                         "/v1/completions".to_string()
                     },
-                    email.clone(),
+                    request_json: serde_json::to_string(&openai_req).ok(),
+                    start_time: std::time::Instant::now(),
+                };
+
+                let s = create_openai_sse_stream(
+                    Box::pin(gemini_stream),
                     openai_req.model.clone(),
-                    0, // tokens_in not available for stream
-                    0, // tokens_out not available for stream
-                    start_time.elapsed().as_millis() as u32,
-                    200,
-                    None,
-                    request_json,
-                    Some("[Stream Data]".to_string()),
+                    Some(log_ctx),
                 );
+                let body = Body::from_stream(s);
 
                 return Ok(Response::builder()
                     .header("Content-Type", "text/event-stream")

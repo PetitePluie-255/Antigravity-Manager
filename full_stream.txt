@@ -1,6 +1,0 @@
-data: {"choices":[{"delta":{"content":"The answer is 4."},"finish_reason":null,"index":0}],"created":1767864722,"id":"chatcmpl-91e97149-fb29-4d34-83ab-be27db5d5c85","model":"gemini-3-pro-high","object":"chat.completion.chunk"}
-
-data: {"choices":[{"delta":{"content":""},"finish_reason":"stop","index":0}],"created":1767864722,"id":"chatcmpl-05ba3396-3898-45c4-b812-2dfe5c85d8a0","model":"gemini-3-pro-high","object":"chat.completion.chunk"}
-
-data: [DONE]
-
