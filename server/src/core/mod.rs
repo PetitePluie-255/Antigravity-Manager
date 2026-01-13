@@ -2,7 +2,10 @@
 //! 包含不依赖 Tauri 的业务逻辑
 
 pub mod db;
+pub mod device;
 pub mod models;
+pub mod quota;
+pub mod scheduler;
 pub mod services;
 pub mod storage;
 pub mod traits;

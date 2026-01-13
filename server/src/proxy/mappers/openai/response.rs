@@ -7,6 +7,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
 
     // 提取 content 和 tool_calls
     let mut content_out = String::new();
+    let mut reasoning_out = String::new();
     let mut tool_calls = Vec::new();
 
     if let Some(parts) = raw
@@ -17,15 +18,12 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
         .and_then(|p| p.as_array())
     {
         for part in parts {
-            /* 暂时禁用：思维链/推理部分 (Gemini 2.0+) 避免干扰 Codex CLI 等非推理客户端
+            // 思维链/推理部分 (Gemini 2.0+)
             if let Some(thought) = part.get("thought").and_then(|t| t.as_str()) {
                 if !thought.is_empty() {
-                    content_out.push_str("<thought>\n");
-                    content_out.push_str(thought);
-                    content_out.push_str("\n</thought>\n\n");
+                    reasoning_out.push_str(thought);
                 }
             }
-            */
 
             // 捕获 thoughtSignature (Gemini 3 工具调用必需)
             if let Some(sig) = part
@@ -131,7 +129,7 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
             "MAX_TOKENS" => "length",
             "SAFETY" => "content_filter",
             "RECITATION" => "content_filter",
-            _ => "stop",
+            _ => f,
         })
         .unwrap_or("stop");
 
@@ -177,6 +175,11 @@ pub fn transform_openai_response(gemini_response: &Value) -> OpenAIResponse {
                 } else {
                     Some(OpenAIContent::String(content_out))
                 },
+                reasoning_content: if reasoning_out.is_empty() {
+                    None
+                } else {
+                    Some(reasoning_out)
+                },
                 tool_calls: if tool_calls.is_empty() {
                     None
                 } else {
@@ -201,7 +204,10 @@ mod tests {
         let gemini_resp = json!({
             "candidates": [{
                 "content": {
-                    "parts": [{"text": "Hello!"}]
+                    "parts": [
+                        {"thought": "Thinking..."},
+                        {"text": "Hello!"}
+                    ]
                 },
                 "finishReason": "STOP"
             }],
@@ -217,6 +223,10 @@ mod tests {
             _ => panic!("Expected string content"),
         };
         assert_eq!(content, "Hello!");
+        assert_eq!(
+            result.choices[0].message.reasoning_content.as_deref(),
+            Some("Thinking...")
+        );
         assert_eq!(result.choices[0].finish_reason, Some("stop".to_string()));
     }
 }

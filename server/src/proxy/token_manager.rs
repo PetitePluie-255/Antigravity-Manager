@@ -500,6 +500,45 @@ impl TokenManager {
     pub fn clear_all_sessions(&self) {
         self.session_accounts.clear();
     }
+
+    /// 根据 Email 获取指定账号的 Token 信息 (用于预热等)
+    pub async fn get_token_by_email(
+        &self,
+        email: &str,
+    ) -> Result<(String, String, String), String> {
+        // 1. 在内存中查找
+        for entry in self.tokens.iter() {
+            let token = entry.value();
+            if token.email == email {
+                return Ok((
+                    token.access_token.clone(),
+                    token.project_id.clone().unwrap_or_default(),
+                    token.account_id.clone(),
+                ));
+            }
+        }
+
+        // 2. 如果内存中没有，尝试从数据库加载 (可能是已禁用的或者刚添加的)
+        let row = sqlx::query(
+            "SELECT access_token, project_id, id FROM accounts WHERE email = ? LIMIT 1",
+        )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+        if let Some(row) = row {
+            use sqlx::Row;
+            Ok((
+                row.get("access_token"),
+                row.get::<Option<String>, _>("project_id")
+                    .unwrap_or_default(),
+                row.get("id"),
+            ))
+        } else {
+            Err(format!("Account not found for email: {}", email))
+        }
+    }
 }
 
 fn truncate_reason(reason: &str, max_len: usize) -> String {

@@ -1,7 +1,7 @@
 //! 账户服务
 //! 账户 CRUD 操作，使用 SQLite 数据库持久化
 
-use crate::core::models::{Account, AccountSummary, QuotaData, TokenData};
+use crate::core::models::{Account, DeviceProfile, DeviceProfileVersion, QuotaData, TokenData};
 use crate::core::traits::EventEmitter;
 use sqlx::{Row, SqlitePool};
 
@@ -51,12 +51,28 @@ impl AccountService {
         }
 
         let id = uuid::Uuid::new_v4().to_string();
-        let account = Account::new(id.clone(), email.clone(), token.clone());
+        let mut account = Account::new(id.clone(), email.clone(), token.clone());
+
+        // 生成初始设备指纹
+        let profile = crate::core::device::generate_profile();
+        account.device_profile = Some(profile.clone());
+        account.device_history.push(DeviceProfileVersion {
+            id: uuid::Uuid::new_v4().to_string(),
+            created_at: account.created_at,
+            label: "初始指纹".to_string(),
+            profile,
+            is_current: true,
+        });
+
         let quota_json = serde_json::to_string(&account.quota).unwrap_or_default();
+        let device_profile_json =
+            serde_json::to_string(&account.device_profile).unwrap_or_default();
+        let device_history_json =
+            serde_json::to_string(&account.device_history).unwrap_or_default();
 
         sqlx::query(
-            "INSERT INTO accounts (id, email, name, access_token, refresh_token, expires_in, expiry_timestamp, created_at, last_used, quota) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO accounts (id, email, name, access_token, refresh_token, expires_in, expiry_timestamp, created_at, last_used, quota, device_profile, device_history) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&email)
@@ -68,6 +84,8 @@ impl AccountService {
         .bind(account.created_at)
         .bind(account.last_used)
         .bind(quota_json)
+        .bind(device_profile_json)
+        .bind(device_history_json)
         .execute(pool)
         .await
         .map_err(|e| format!("添加账户到数据库失败: {}", e))?;
@@ -265,6 +283,15 @@ impl AccountService {
         let quota_raw: Option<String> = row.get("quota");
         let quota: Option<QuotaData> = quota_raw.and_then(|s| serde_json::from_str(&s).ok());
 
+        let device_profile_raw: Option<String> = row.get("device_profile");
+        let device_profile: Option<DeviceProfile> =
+            device_profile_raw.and_then(|s| serde_json::from_str(&s).ok());
+
+        let device_history_raw: Option<String> = row.get("device_history");
+        let device_history: Vec<DeviceProfileVersion> = device_history_raw
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
         Account {
             id: row.get("id"),
             email: row.get("email"),
@@ -279,7 +306,15 @@ impl AccountService {
                 project_id: row.get("project_id"),
                 session_id: None,
             },
+            device_profile,
+            device_history,
             quota,
+            disabled: row.get("disabled"),
+            disabled_reason: row.get("disabled_reason"),
+            disabled_at: row.get("disabled_at"),
+            proxy_disabled: row.get("proxy_disabled"),
+            proxy_disabled_reason: row.get("proxy_disabled_reason"),
+            proxy_disabled_at: row.get("proxy_disabled_at"),
             created_at: row.get("created_at"),
             last_used: row.get("last_used"),
         }

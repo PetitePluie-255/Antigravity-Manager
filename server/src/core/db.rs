@@ -63,6 +63,14 @@ pub async fn init_db(data_dir: &Path) -> Result<SqlitePool, String> {
         ("last_used", "INTEGER"),
         ("is_current", "BOOLEAN DEFAULT FALSE"),
         ("quota", "TEXT"),
+        ("device_profile", "TEXT"),
+        ("device_history", "TEXT"),
+        ("disabled", "BOOLEAN DEFAULT FALSE"),
+        ("disabled_reason", "TEXT"),
+        ("disabled_at", "INTEGER"),
+        ("proxy_disabled", "BOOLEAN DEFAULT FALSE"),
+        ("proxy_disabled_reason", "TEXT"),
+        ("proxy_disabled_at", "INTEGER"),
     ];
 
     for (name, col_type) in new_columns {

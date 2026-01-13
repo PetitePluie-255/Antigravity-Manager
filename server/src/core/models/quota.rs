@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelQuota {
     pub name: String,
-    pub percentage: i32,  // 剩余百分比 0-100
+    pub percentage: i32, // 剩余百分比 0-100
     pub reset_time: String,
 }
 
@@ -17,6 +17,8 @@ pub struct QuotaData {
     pub last_updated: i64,
     #[serde(default)]
     pub is_forbidden: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_tier: Option<String>,
 }
 
 impl QuotaData {
@@ -25,6 +27,7 @@ impl QuotaData {
             models: Vec::new(),
             last_updated: chrono::Utc::now().timestamp(),
             is_forbidden: false,
+            subscription_tier: None,
         }
     }
 
@@ -35,7 +38,7 @@ impl QuotaData {
             reset_time,
         });
     }
-    
+
     /// 获取平均配额百分比
     pub fn average_percentage(&self) -> i32 {
         if self.models.is_empty() {

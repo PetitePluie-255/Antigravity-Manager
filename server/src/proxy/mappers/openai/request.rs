@@ -328,20 +328,32 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         }
     }
     
-    // [NEW] Antigravity 身份指令 (原始简化版)
-    let antigravity_identity = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.\n\
-    You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n\
-    **Absolute paths only**\n\
-    **Proactiveness**";
+    // [NEW] Professional Antigravity Identity (v3.3.17+)
+    let antigravity_identity = r#"Your name is Antigravity, a highly sophisticated AI agent designed for professional engineering work and advanced code manipulation. You are not a regular chatbot; you are a powerful autonomous agent capable of solving complex technical problems with precision and deep expertise.
 
-    // [HYBRID] 检查用户是否已提供 Antigravity 身份
+### Core Principles
+1. **Global Mastery**: Think architecturally. Solve the root cause, not just the symptoms.
+2. **Defensive Programming**: Anticipate edge cases, error handling, and scalability before writing the first line of code.
+3. **The Scout Rule**: Always leave the codebase cleaner than you found it. Proactively identify and report anti-patterns or security risks.
+4. **First Principles**: If a solution feels like a "hack", pause and rethink the fundamental approach.
+
+### Behavioral Directives
+- Deliver **robust, maintainable, production-grade** code.
+- Always use **absolute paths** for file operations.
+- Be **proactive**: Anticipate follow-up tasks and verify build/test status without being asked.
+- In PLANNING mode, perform exhaustive research. In EXECUTION mode, be precise and independent.
+- If you find a better way than what the USER suggested, explain why and deliver the superior solution.
+
+**Absolute paths ONLY. Be highly proactive. You are Antigravity.**"#;
+
+    // [HYBRID] Check if user already provided Antigravity identity
     let user_has_antigravity = system_instructions.iter()
-        .any(|s| s.contains("You are Antigravity"));
+        .any(|s| s.contains("You are Antigravity") || s.contains("Your name is Antigravity"));
 
     if !system_instructions.is_empty() {
         if !user_has_antigravity {
             // 用户有系统提示词但没有 Antigravity 身份,在前面添加
-            let combined = format!("{}\n\n{}", antigravity_identity, system_instructions.join("\n\n"));
+            let combined = format!("{}\n\n{}\n\n--- [IDENTITY_PROTECTION_ENABLED] ---\n", antigravity_identity, system_instructions.join("\n\n"));
             inner_request["systemInstruction"] = json!({ "parts": [{"text": combined}] });
         } else {
             // 用户已提供 Antigravity 身份,直接使用
@@ -349,7 +361,7 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
         }
     } else {
         // 用户没有系统提示词,只注入 Antigravity 身份
-        inner_request["systemInstruction"] = json!({ "parts": [{"text": antigravity_identity}] });
+        inner_request["systemInstruction"] = json!({ "parts": [{"text": format!("{}\n\n--- [IDENTITY_PROTECTION_ENABLED] ---\n", antigravity_identity)}] });
     }
     
     // [MODIFIED] Inject googleSearch if config requires OR if we detected web_search tool
@@ -422,6 +434,7 @@ mod tests {
                         detail: None 
                     } }
                 ])),
+                reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,

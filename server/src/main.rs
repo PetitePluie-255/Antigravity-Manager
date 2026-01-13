@@ -53,6 +53,9 @@ async fn main() {
         }
     }
 
+    // Start Smart Warmup Scheduler
+    antigravity_server::core::scheduler::start_scheduler(app_state.clone());
+
     // Add CORS
     let cors = CorsLayer::permissive();
 
@@ -103,6 +106,8 @@ async fn main() {
             post(handlers::openai::handle_images_edits),
         )
         .route("/v1/models", get(handlers::openai::handle_list_models))
+        // internal warmup
+        .route("/internal/warmup", post(handlers::warmup::handle_warmup))
         // Claude
         .route("/v1/messages", post(handlers::claude::handle_messages))
         // Gemini

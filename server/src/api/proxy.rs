@@ -106,7 +106,7 @@ pub async fn update_model_mapping(
     Json(proxy_config): Json<ProxyConfig>,
 ) -> Response {
     use crate::core::storage::ConfigStorage;
-    use crate::core::traits::StorageConfig;
+    // use crate::core::traits::StorageConfig;
 
     match ConfigStorage::load(&state.db_pool, &state.storage).await {
         Ok(mut config) => {

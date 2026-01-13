@@ -32,6 +32,7 @@ pub async fn handle_chat_completions(
                 content: Some(crate::proxy::mappers::openai::OpenAIContent::String(
                     " ".to_string(),
                 )),
+                reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
@@ -569,6 +570,7 @@ pub async fn handle_completions(
                 content: Some(crate::proxy::mappers::openai::OpenAIContent::String(
                     " ".to_string(),
                 )),
+                reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,

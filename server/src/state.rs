@@ -54,6 +54,7 @@ pub struct AppState {
     pub zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState,
     pub monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
     pub db_pool: sqlx::SqlitePool,
+    pub warmup_enabled: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -94,6 +95,7 @@ impl AppState {
             zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new(),
             monitor: Arc::new(crate::proxy::monitor::ProxyMonitor::default()),
             db_pool,
+            warmup_enabled: Arc::new(AtomicBool::new(true)),
         })
     }
 
@@ -134,6 +136,7 @@ impl AppState {
             zai_vision_mcp: crate::proxy::zai_vision_mcp::ZaiVisionMcpState::new(),
             monitor: Arc::new(crate::proxy::monitor::ProxyMonitor::default()),
             db_pool,
+            warmup_enabled: Arc::new(AtomicBool::new(true)),
         })
     }
 }
