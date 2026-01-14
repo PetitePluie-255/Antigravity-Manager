@@ -14,6 +14,8 @@ import {
   Search,
   Activity,
   X,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from "lucide-react";
 import { request } from "../api/client";
 import { showToast } from "../components/common/ToastContainer";
@@ -135,6 +137,12 @@ function Logs() {
   // 格式化 JSON 显示
   const formatBody = (body?: string) => {
     if (!body) return <span className="text-gray-400 italic">Empty</span>;
+
+    // 检查是否是 SSE 流数据
+    if (body.startsWith("data:") || body.includes("\ndata:")) {
+      return formatStreamData(body);
+    }
+
     try {
       const obj = JSON.parse(body);
       return (
@@ -144,7 +152,9 @@ function Logs() {
       );
     } catch {
       if (body === "[Stream Data]") {
-        return <span className="text-gray-400 italic">[Stream Data]</span>;
+        return (
+          <span className="text-gray-400 italic">[流式响应 - 无详细数据]</span>
+        );
       }
       return (
         <pre className="text-[11px] font-mono whitespace-pre-wrap text-gray-700 dark:text-gray-300 max-h-[300px] overflow-auto">
@@ -152,6 +162,81 @@ function Logs() {
         </pre>
       );
     }
+  };
+
+  // 格式化 SSE 流数据
+  const formatStreamData = (body: string) => {
+    const lines = body.split("\n");
+    const chunks: any[] = [];
+    let aggregatedContent = "";
+
+    for (const line of lines) {
+      if (line.startsWith("data:")) {
+        const jsonStr = line.slice(5).trim();
+        if (jsonStr === "[DONE]") continue;
+        try {
+          const obj = JSON.parse(jsonStr);
+          chunks.push(obj);
+          // 提取 delta content
+          const delta =
+            obj.choices?.[0]?.delta?.content ||
+            obj.delta?.text ||
+            obj.choices?.[0]?.text ||
+            "";
+          aggregatedContent += delta;
+        } catch {
+          // 忽略无法解析的行
+        }
+      }
+    }
+
+    if (chunks.length === 0) {
+      return (
+        <pre className="text-[11px] font-mono whitespace-pre-wrap text-gray-700 dark:text-gray-300 max-h-[300px] overflow-auto">
+          {body}
+        </pre>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {/* 聚合内容预览 */}
+        {aggregatedContent && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+            <div className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase mb-1 flex items-center gap-1">
+              <span>📝</span> 聚合内容
+            </div>
+            <pre className="text-[11px] font-mono whitespace-pre-wrap text-gray-800 dark:text-gray-200 max-h-[150px] overflow-auto">
+              {aggregatedContent}
+            </pre>
+          </div>
+        )}
+
+        {/* 流式 chunks 概要 */}
+        <div className="bg-gray-50 dark:bg-base-200/50 border border-gray-200 dark:border-base-300 rounded-lg p-3">
+          <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase mb-2 flex items-center gap-1">
+            <span>📦</span> 流式数据块 ({chunks.length} 个)
+          </div>
+          <details className="text-[10px]">
+            <summary className="cursor-pointer text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 font-medium">
+              点击展开原始数据块
+            </summary>
+            <pre className="mt-2 text-[10px] font-mono whitespace-pre-wrap text-gray-600 dark:text-gray-400 max-h-[200px] overflow-auto bg-white dark:bg-base-100 p-2 rounded border border-gray-100 dark:border-base-200">
+              {chunks
+                .map(
+                  (chunk, i) =>
+                    `--- Chunk ${i + 1} ---\n${JSON.stringify(
+                      chunk,
+                      null,
+                      2
+                    )}\n\n`
+                )
+                .join("")}
+            </pre>
+          </details>
+        </div>
+      </div>
+    );
   };
 
   // 过滤日志
@@ -372,19 +457,21 @@ function Logs() {
                         {log.account_email.split("@")[0]}
                       </td>
                       <td className="px-4 py-3 text-gray-600 dark:text-gray-400 font-mono text-xs">
-                        <span className="text-blue-600">
-                          I: {log.tokens_in}
+                        <span className="text-blue-600 inline-flex items-center gap-0.5">
+                          <ArrowDownToLine className="w-3 h-3" />
+                          {log.tokens_in}
                         </span>
                         <span className="mx-1">·</span>
-                        <span className="text-green-600">
-                          O: {log.tokens_out}
+                        <span className="text-green-600 inline-flex items-center gap-0.5">
+                          <ArrowUpFromLine className="w-3 h-3" />
+                          {log.tokens_out}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-600 dark:text-gray-400 font-mono">
                         {log.latency_ms}ms
                       </td>
-                      <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                        {formatTimeShort(log.timestamp)}
+                      <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                        {formatTime(log.timestamp)}
                       </td>
                     </tr>
                   ))}
@@ -487,11 +574,13 @@ function Logs() {
                       TOKEN 消耗 (输入/输出)
                     </span>
                     <div className="font-mono text-[11px] flex gap-2">
-                      <span className="text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 rounded-md border border-blue-200 dark:border-blue-800/50 font-bold">
-                        In: {selectedLog.tokens_in}
+                      <span className="text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/40 px-2.5 py-1 rounded-md border border-blue-200 dark:border-blue-800/50 font-bold inline-flex items-center gap-1">
+                        <ArrowDownToLine className="w-3 h-3" />
+                        {selectedLog.tokens_in}
                       </span>
-                      <span className="text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/40 px-2.5 py-1 rounded-md border border-green-200 dark:border-green-800/50 font-bold">
-                        Out: {selectedLog.tokens_out}
+                      <span className="text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/40 px-2.5 py-1 rounded-md border border-green-200 dark:border-green-800/50 font-bold inline-flex items-center gap-1">
+                        <ArrowUpFromLine className="w-3 h-3" />
+                        {selectedLog.tokens_out}
                       </span>
                     </div>
                   </div>

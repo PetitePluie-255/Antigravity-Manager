@@ -8,6 +8,10 @@ const USER_AGENT: &str = "antigravity/windows/amd64";
 const QUOTA_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadModelQuotas";
 const CLOUD_CODE_BASE_URL: &str = "https://cloudcode-pa.googleapis.com";
 
+const NEAR_READY_THRESHOLD: i32 = 80;
+const MAX_RETRIES: i32 = 2;
+const RETRY_DELAY_SECS: u64 = 15;
+
 #[derive(Debug, Deserialize)]
 struct QuotaResponse {
     models: std::collections::HashMap<String, ModelInfo>,
@@ -241,5 +245,143 @@ pub async fn warmup_model_directly(
             );
             false
         }
+    }
+}
+
+/// 准备用于预热的有效 Token
+pub async fn get_valid_token_for_warmup(
+    pool: &sqlx::SqlitePool,
+    account: &crate::core::models::Account,
+) -> AppResult<(String, String)> {
+    let mut account = account.clone();
+
+    // 检查并自动刷新 token
+    let new_token = crate::core::services::oauth::ensure_fresh_token(&account.token).await?;
+
+    // 如果 token 改变了（意味着刷新了），保存它
+    if new_token.access_token != account.token.access_token {
+        account.token = new_token;
+        if let Err(e) = crate::core::services::account::AccountService::upsert_account(
+            pool,
+            &crate::core::traits::NoopEmitter,
+            account.email.clone(),
+            account.name.clone(),
+            account.token.clone(),
+        )
+        .await
+        {
+            warn!("[Warmup] 保存刷新后的 Token 失败: {}", e);
+        } else {
+            info!("[Warmup] 成功为 {} 刷新并保存了新 Token", account.email);
+        }
+    }
+
+    // 获取 project_id
+    let (project_id, _) = fetch_project_id(&account.token.access_token, &account.email).await;
+    let final_pid = project_id.unwrap_or_else(|| "bamboo-precept-lgxtn".to_string());
+
+    Ok((account.token.access_token, final_pid))
+}
+
+/// 智能预热所有账号 (此版本由 scheduler 调用，或由前端手动触发)
+pub async fn warm_up_all_accounts(pool: &sqlx::SqlitePool, port: u16) -> AppResult<String> {
+    let mut retry_count = 0;
+
+    loop {
+        let target_accounts = crate::core::services::account::AccountService::list_accounts(pool)
+            .await
+            .map_err(|e| AppError::Account(e))?;
+
+        if target_accounts.is_empty() {
+            return Ok("没有可用账号".to_string());
+        }
+
+        info!(
+            "[Warmup] 开始筛选 {} 个账号的模型...",
+            target_accounts.len()
+        );
+
+        let mut warmup_items = Vec::new();
+        let mut has_near_ready_models = false;
+
+        for account in &target_accounts {
+            // 跳过已禁用的账号
+            if account.disabled {
+                continue;
+            }
+
+            let (token, pid) = match get_valid_token_for_warmup(pool, account).await {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!("[Warmup] 账号 {} 准备失败: {}", account.email, e);
+                    continue;
+                }
+            };
+
+            // 获取最新实时配额
+            if let Ok((fresh_quota, _)) = fetch_quota(&token, &account.email).await {
+                let mut account_warmed_series = std::collections::HashSet::new();
+                for m in fresh_quota.models {
+                    if m.percentage >= 100 {
+                        // 1. 映射逻辑
+                        let model_to_ping = if m.name == "gemini-2.5-flash" {
+                            "gemini-3-flash".to_string()
+                        } else {
+                            m.name.clone()
+                        };
+
+                        // 2. 严格白名单过滤
+                        match model_to_ping.as_str() {
+                            "gemini-3-flash" | "claude-sonnet-4-5" | "gemini-3-pro-high"
+                            | "gemini-3-pro-image" => {
+                                if !account_warmed_series.contains(&model_to_ping) {
+                                    warmup_items.push((
+                                        account.email.clone(),
+                                        model_to_ping.clone(),
+                                        token.clone(),
+                                        pid.clone(),
+                                        m.percentage,
+                                    ));
+                                    account_warmed_series.insert(model_to_ping);
+                                }
+                            }
+                            _ => continue,
+                        }
+                    } else if m.percentage >= NEAR_READY_THRESHOLD {
+                        has_near_ready_models = true;
+                    }
+                }
+            }
+        }
+
+        if !warmup_items.is_empty() {
+            let total = warmup_items.len();
+            tokio::spawn(async move {
+                let mut success = 0;
+                let round_total = warmup_items.len();
+                for (idx, (email, model, token, pid, pct)) in warmup_items.into_iter().enumerate() {
+                    if warmup_model_directly(&token, &model, &pid, &email, pct, port).await {
+                        success += 1;
+                    }
+                    if idx < round_total - 1 {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    }
+                }
+                info!("[Warmup] 预热任务完成: 成功 {}/{}", success, total);
+            });
+            return Ok(format!("已启动 {} 个模型的预热任务", total));
+        }
+
+        if has_near_ready_models && retry_count < MAX_RETRIES {
+            retry_count += 1;
+            info!(
+                "[Warmup] 检测到临界恢复模型，等待 {}s 后重试 ({}/{})",
+                RETRY_DELAY_SECS, retry_count, MAX_RETRIES
+            );
+            tokio::time::sleep(tokio::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
+            continue;
+        }
+
+        return Ok("没有模型需要预热".to_string());
     }
 }

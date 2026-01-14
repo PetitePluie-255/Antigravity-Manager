@@ -1,6 +1,46 @@
 use crate::core::models::DeviceProfile;
 use rand::{distributions::Alphanumeric, Rng};
+use std::fs;
+use std::path::PathBuf;
 use uuid::Uuid;
+
+const GLOBAL_BASELINE: &str = "device_original.json";
+
+/// 获取数据目录（用于存放全局指纹等）
+pub fn get_data_dir() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or_else(|| "无法获取用户目录".to_string())?;
+    let dir = home.join(".gemini-antigravity");
+    if !dir.exists() {
+        fs::create_dir_all(&dir).map_err(|e| format!("创建数据目录失败: {}", e))?;
+    }
+    Ok(dir)
+}
+
+/// 全局原始指纹（所有账号共享）的存取
+pub fn load_global_original() -> Option<DeviceProfile> {
+    if let Ok(dir) = get_data_dir() {
+        let path = dir.join(GLOBAL_BASELINE);
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                if let Ok(profile) = serde_json::from_str::<DeviceProfile>(&content) {
+                    return Some(profile);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn save_global_original(profile: &DeviceProfile) -> Result<(), String> {
+    let dir = get_data_dir()?;
+    let path = dir.join(GLOBAL_BASELINE);
+    if path.exists() {
+        return Ok(()); // 已存在则不覆盖
+    }
+    let content =
+        serde_json::to_string_pretty(profile).map_err(|e| format!("序列化原始指纹失败: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("写入原始指纹失败: {}", e))
+}
 
 /// 生成一组新的设备指纹（符合 Cursor/VSCode 风格）
 pub fn generate_profile() -> DeviceProfile {

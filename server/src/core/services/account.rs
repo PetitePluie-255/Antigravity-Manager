@@ -53,8 +53,15 @@ impl AccountService {
         let id = uuid::Uuid::new_v4().to_string();
         let mut account = Account::new(id.clone(), email.clone(), token.clone());
 
-        // 生成初始设备指纹
-        let profile = crate::core::device::generate_profile();
+        // 生成初始设备指纹: 优先使用全局原始指纹，否则生成并保存为全局原始
+        let profile = if let Some(global) = crate::core::device::load_global_original() {
+            global
+        } else {
+            let new_profile = crate::core::device::generate_profile();
+            let _ = crate::core::device::save_global_original(&new_profile);
+            new_profile
+        };
+
         account.device_profile = Some(profile.clone());
         account.device_history.push(DeviceProfileVersion {
             id: uuid::Uuid::new_v4().to_string(),
@@ -209,7 +216,7 @@ impl AccountService {
         // 先检查是否存在
         let _ = Self::load_account(pool, account_id).await?;
 
-        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+        let mut tx = pool.begin().await.map_err(|e| format!("{}", e))?;
 
         sqlx::query("UPDATE accounts SET is_current = 0")
             .execute(&mut *tx)
@@ -227,7 +234,7 @@ impl AccountService {
             .await
             .ok();
 
-        tx.commit().await.map_err(|e| e.to_string())?;
+        tx.commit().await.map_err(|e| format!("{}", e))?;
 
         emitter.emit("account-switched", account_id);
         Ok(())
@@ -266,6 +273,25 @@ impl AccountService {
             .execute(pool)
             .await
             .map_err(|e| format!("更新配额失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 更新账户设备指纹
+    pub async fn update_account_device(
+        pool: &SqlitePool,
+        account_id: &str,
+        device_profile: Option<DeviceProfile>,
+        device_history: Vec<DeviceProfileVersion>,
+    ) -> Result<(), String> {
+        let device_profile_json = serde_json::to_string(&device_profile).unwrap_or_default();
+        let device_history_json = serde_json::to_string(&device_history).unwrap_or_default();
+        sqlx::query("UPDATE accounts SET device_profile = ?, device_history = ? WHERE id = ?")
+            .bind(device_profile_json)
+            .bind(device_history_json)
+            .bind(account_id)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("更新设备指纹失败: {}", e))?;
         Ok(())
     }
 

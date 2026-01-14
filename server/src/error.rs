@@ -25,6 +25,12 @@ pub enum AppError {
     Unknown(String),
 }
 
+impl From<String> for AppError {
+    fn from(s: String) -> Self {
+        AppError::Unknown(s)
+    }
+}
+
 // 实现 Serialize 以便可以作为 Tauri 命令的返回值
 impl Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

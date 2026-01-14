@@ -80,3 +80,54 @@ export async function importJsonAccounts(
     body: JSON.stringify(jsonContent),
   });
 }
+
+// ========== Device Fingerprint APIs ==========
+
+import { DeviceProfile, DeviceProfilesResponse } from "../types/account";
+
+export async function getDeviceProfiles(
+  accountId: string
+): Promise<DeviceProfilesResponse> {
+  return await request(`/accounts/${accountId}/device-profiles`);
+}
+
+export async function previewGenerateProfile(): Promise<DeviceProfile> {
+  return await request("/device/preview-generate");
+}
+
+export async function bindDeviceProfileWithProfile(
+  accountId: string,
+  profile: DeviceProfile
+): Promise<DeviceProfile> {
+  return await request(`/accounts/${accountId}/device-profiles/bind`, {
+    method: "POST",
+    body: JSON.stringify({ profile }),
+  });
+}
+
+export async function restoreDeviceVersion(
+  accountId: string,
+  versionId: string
+): Promise<DeviceProfile> {
+  return await request(
+    `/accounts/${accountId}/device-profiles/restore/${versionId}`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function deleteDeviceVersion(
+  accountId: string,
+  versionId: string
+): Promise<void> {
+  return await request(`/accounts/${accountId}/device-profiles/${versionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function restoreOriginalDevice(): Promise<string> {
+  return await request("/device/restore-original", {
+    method: "POST",
+  });
+}

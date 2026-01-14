@@ -263,7 +263,29 @@ pub fn create_openai_sse_stream(
                     }
                 }
                 Err(e) => {
-                    yield Err(format!("Upstream error: {}", e));
+                    let (error_type, message, i18n_key) = crate::proxy::mappers::error_classifier::classify_stream_error(&e);
+                    let error_chunk = json!({
+                        "id": &stream_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "error",
+                                "error": {
+                                    "message": message,
+                                    "type": error_type,
+                                    "param": null,
+                                    "code": i18n_key
+                                }
+                            }
+                        ]
+                    });
+                    yield Ok::<Bytes, String>(Bytes::from(format!("data: {}\n\n", serde_json::to_string(&error_chunk).unwrap_or_default())));
+                    // [NEW] 记录错误到日志
+                    tracing::error!("[OpenAI-Stream] Upstream error: {} ({})", e, error_type);
                 }
             }
         }

@@ -5,6 +5,8 @@ import { AppConfig } from "../types/config";
 import { showToast } from "../components/common/ToastContainer";
 import { useTranslation } from "react-i18next";
 import { request } from "../api/client";
+import SmartWarmup from "../components/settings/SmartWarmup";
+import QuotaProtection from "../components/settings/QuotaProtection";
 
 function Settings() {
   const { t } = useTranslation();
@@ -19,6 +21,15 @@ function Settings() {
     refresh_interval: 15,
     auto_sync: false,
     sync_interval: 5,
+    scheduled_warmup: {
+      enabled: false,
+      monitored_models: [],
+    },
+    quota_protection: {
+      enabled: false,
+      threshold_percentage: 10,
+      monitored_models: [],
+    },
     proxy: {
       enabled: false,
       port: 8080,
@@ -121,7 +132,11 @@ function Settings() {
                   }
                 >
                   <option value="zh">简体中文</option>
+                  <option value="zh-TW">繁體中文</option>
                   <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                  <option value="tr">Türkçe</option>
+                  <option value="vi">Tiếng Việt</option>
                 </select>
               </div>
 
@@ -201,6 +216,37 @@ function Settings() {
                   />
                 </div>
               )}
+
+              {/* 智能预热 */}
+              <div className="p-4 bg-gray-50 dark:bg-base-200 rounded-lg border border-gray-100 dark:border-base-300">
+                <SmartWarmup
+                  config={
+                    formData.scheduled_warmup ?? {
+                      enabled: false,
+                      monitored_models: [],
+                    }
+                  }
+                  onChange={(newConfig) =>
+                    setFormData({ ...formData, scheduled_warmup: newConfig })
+                  }
+                />
+              </div>
+
+              {/* 配额保护 */}
+              <div className="p-4 bg-gray-50 dark:bg-base-200 rounded-lg border border-gray-100 dark:border-base-300">
+                <QuotaProtection
+                  config={
+                    formData.quota_protection ?? {
+                      enabled: false,
+                      threshold_percentage: 10,
+                      monitored_models: [],
+                    }
+                  }
+                  onChange={(newConfig) =>
+                    setFormData({ ...formData, quota_protection: newConfig })
+                  }
+                />
+              </div>
             </div>
           )}
 

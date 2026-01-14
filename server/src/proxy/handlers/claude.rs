@@ -642,7 +642,7 @@ pub async fn handle_messages(
         // 生成 Trace ID (简单用时间戳后缀)
         // let _trace_id = format!("req_{}", chrono::Utc::now().timestamp_subsec_millis());
 
-        let gemini_body = match transform_claude_request_in(&request_with_mapped, &project_id) {
+        let gemini_body = match transform_claude_request_in(&request_with_mapped, &project_id, session_id) {
             Ok(b) => {
                 debug!("[{}] Transformed Gemini Body: {}", trace_id, serde_json::to_string_pretty(&b).unwrap_or_default());
                 b
@@ -688,7 +688,12 @@ pub async fn handle_messages(
             if request.stream {
                 let stream = response.bytes_stream();
                 let gemini_stream = Box::pin(stream);
-                let claude_stream = create_claude_sse_stream(gemini_stream, trace_id, email.clone());
+                let claude_stream = create_claude_sse_stream(
+                    gemini_stream,
+                    trace_id,
+                    email.clone(),
+                    session_id.unwrap_or_default().to_string(),
+                );
 
                 // Record streaming request to log store
                 let request_json = serde_json::to_string(&request_with_mapped).ok();

@@ -2,7 +2,7 @@
 // 对应 transformClaudeRequestIn
 
 use super::models::*;
-use crate::proxy::mappers::signature_store::get_thought_signature;
+use crate::proxy::SignatureCache;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -114,16 +114,80 @@ fn clean_cache_control_from_messages(messages: &mut [Message]) {
     }
 }
 
+/// [FIX #564] Sort blocks in assistant messages to ensure thinking blocks are first
+///
+/// When context compression (kilo) reorders message blocks, thinking blocks may appear
+/// after text blocks. Claude/Anthropic API requires thinking blocks to be first if
+/// any thinking blocks exist in the message. This function pre-sorts blocks to ensure
+/// thinking/redacted_thinking blocks always come before other block types.
+fn sort_thinking_blocks_first(messages: &mut [Message]) {
+    for msg in messages.iter_mut() {
+        if msg.role == "assistant" {
+            if let MessageContent::Array(blocks) = &mut msg.content {
+                // Check if reordering is needed (any thinking block not at start)
+                let mut found_non_thinking = false;
+                let mut needs_reorder = false;
+
+                for block in blocks.iter() {
+                    match block {
+                        ContentBlock::Thinking { .. } | ContentBlock::RedactedThinking { .. } => {
+                            if found_non_thinking {
+                                needs_reorder = true;
+                                break;
+                            }
+                        }
+                        _ => {
+                            found_non_thinking = true;
+                        }
+                    }
+                }
+
+                if needs_reorder {
+                    tracing::warn!(
+                        "[FIX #564] Detected thinking blocks after non-thinking blocks. Reordering to fix protocol violation."
+                    );
+
+                    // Partition: thinking blocks first, then other blocks (maintain order within groups)
+                    let mut thinking_blocks: Vec<ContentBlock> = Vec::new();
+                    let mut other_blocks: Vec<ContentBlock> = Vec::new();
+
+                    for block in blocks.drain(..) {
+                        match &block {
+                            ContentBlock::Thinking { .. }
+                            | ContentBlock::RedactedThinking { .. } => {
+                                thinking_blocks.push(block);
+                            }
+                            _ => {
+                                other_blocks.push(block);
+                            }
+                        }
+                    }
+
+                    // Reconstruct: thinking first, then others
+                    blocks.extend(thinking_blocks);
+                    blocks.extend(other_blocks);
+                }
+            }
+        }
+    }
+}
+
 /// 转换 Claude 请求为 Gemini v1internal 格式
 pub fn transform_claude_request_in(
     claude_req: &ClaudeRequest,
     project_id: &str,
+    session_id: Option<&str>,
 ) -> Result<Value, String> {
     // [CRITICAL FIX] 预先清理所有消息中的 cache_control 字段
     // 这解决了 VS Code 插件等客户端在多轮对话中将历史消息的 cache_control 字段
     // 原封不动发回导致的 "Extra inputs are not permitted" 错误
     let mut cleaned_req = claude_req.clone();
     clean_cache_control_from_messages(&mut cleaned_req.messages);
+
+    // [FIX #564] Pre-sort thinking blocks to be first in assistant messages
+    // This handles cases where context compression (kilo) incorrectly reorders blocks
+    sort_thinking_blocks_first(&mut cleaned_req.messages);
+
     let claude_req = &cleaned_req; // 后续使用清理后的请求
 
     // 检测是否有联网工具 (server tool or built-in tool)
@@ -217,7 +281,8 @@ pub fn transform_claude_request_in(
     // [FIX #295 & #298] If thinking enabled but no signature available,
     // disable thinking to prevent Gemini 3 Pro rejection
     if is_thinking_enabled {
-        let global_sig = get_thought_signature();
+        let global_sig =
+            SignatureCache::global().get_session_signature(session_id.unwrap_or_default());
 
         // Check if there are any thinking blocks in message history
         let has_thinking_history = claude_req.messages.iter().any(|m| {
@@ -275,6 +340,7 @@ pub fn transform_claude_request_in(
         &mut tool_id_to_name,
         is_thinking_enabled,
         allow_dummy_thought,
+        session_id,
     )?;
 
     // 3. Tools
@@ -535,6 +601,7 @@ fn build_contents(
     tool_id_to_name: &mut HashMap<String, String>,
     is_thinking_enabled: bool,
     allow_dummy_thought: bool,
+    session_id: Option<&str>,
 ) -> Result<Value, String> {
     let mut contents = Vec::new();
     let mut last_thought_signature: Option<String> = None;
@@ -658,9 +725,10 @@ fn build_contents(
                                 .or(last_thought_signature.as_ref())
                                 .cloned()
                                 .or_else(|| {
-                                    let global_sig = get_thought_signature();
+                                    let global_sig = SignatureCache::global().get_session_signature(session_id.unwrap_or_default());
                                     if global_sig.is_some() {
-                                        tracing::info!("[Claude-Request] Using global thought_signature fallback (length: {})", 
+                                        tracing::info!("[Claude-Request] Using session {} thought_signature fallback (length: {})", 
+                                            session_id.unwrap_or("default"),
                                             global_sig.as_ref().unwrap().len());
                                     }
                                     global_sig
@@ -994,7 +1062,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok());
 
         let body = result.unwrap();
@@ -1089,7 +1157,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok());
 
         let body = result.unwrap();
@@ -1157,7 +1225,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok());
 
         // 验证请求成功转换
@@ -1228,7 +1296,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok());
 
         let body = result.unwrap();
@@ -1276,7 +1344,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok());
 
         let body = result.unwrap();
@@ -1329,7 +1397,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok(), "Transformation failed");
         let body = result.unwrap();
         let contents = body["request"]["contents"].as_array().unwrap();
@@ -1375,7 +1443,7 @@ mod tests {
             output_config: None,
         };
 
-        let result = transform_claude_request_in(&req, "test-project");
+        let result = transform_claude_request_in(&req, "test-project", None);
         assert!(result.is_ok());
         let body = result.unwrap();
         let parts = body["request"]["contents"][0]["parts"].as_array().unwrap();
@@ -1387,5 +1455,46 @@ mod tests {
             parts[0].get("thought").is_none(),
             "Redacted thinking should NOT have thought: true"
         );
+    }
+
+    #[test]
+    fn test_thinking_blocks_sorted_first_after_compression() {
+        // Simulate kilo context compression reordering: text BEFORE thinking
+        let mut messages = vec![Message {
+            role: "assistant".to_string(),
+            content: MessageContent::Array(vec![
+                ContentBlock::Text {
+                    text: "Thought summary".to_string(),
+                },
+                ContentBlock::Thinking {
+                    thinking: "Thinking process".to_string(),
+                    signature: Some("sig123".to_string()),
+                    cache_control: None,
+                },
+                ContentBlock::Text {
+                    text: "Final answer".to_string(),
+                },
+            ]),
+        }];
+
+        // Apply the fix
+        sort_thinking_blocks_first(&mut messages);
+
+        // Verify thinking is now first
+        if let MessageContent::Array(blocks) = &messages[0].content {
+            assert_eq!(blocks.len(), 3, "Should still have 3 blocks");
+            assert!(
+                matches!(blocks[0], ContentBlock::Thinking { .. }),
+                "Thinking should be first"
+            );
+            assert!(
+                matches!(&blocks[1], ContentBlock::Text { text } if text == "Thought summary"),
+                "First text should be second"
+            );
+            assert!(
+                matches!(&blocks[2], ContentBlock::Text { text } if text == "Final answer"),
+                "Second text should be third"
+            );
+        }
     }
 }

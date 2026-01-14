@@ -1,6 +1,7 @@
 //! OAuth 服务
 //! 提供 Token 刷新和 OAuth 登录功能（独立于 Tauri）
 
+use crate::core::models::TokenData;
 use serde::{Deserialize, Serialize};
 
 // Google OAuth 配置 - 从环境变量获取或使用默认值
@@ -193,4 +194,24 @@ pub async fn get_user_info(access_token: &str) -> Result<UserInfo, String> {
         let error_text = response.text().await.unwrap_or_default();
         Err(format!("获取用户信息失败: {}", error_text))
     }
+}
+
+/// 确保 Token 有效，过期的会自动刷新
+pub async fn ensure_fresh_token(token: &TokenData) -> Result<TokenData, String> {
+    let now = chrono::Utc::now().timestamp();
+    // 提前 5 分钟刷新
+    if token.expiry_timestamp > now + 300 {
+        return Ok(token.clone());
+    }
+
+    tracing::info!("Token 正在过期或已过期，准备自动刷新...");
+    let res = refresh_access_token(&token.refresh_token).await?;
+
+    let mut new_token = token.clone();
+    new_token.access_token = res.access_token;
+    new_token.expires_in = res.expires_in;
+    // 重新计算过期时间
+    new_token.expiry_timestamp = now + res.expires_in;
+
+    Ok(new_token)
 }

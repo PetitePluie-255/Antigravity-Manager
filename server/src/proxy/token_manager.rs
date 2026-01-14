@@ -240,7 +240,7 @@ impl TokenManager {
             {
                 let sid = session_id.unwrap();
                 if let Some(bound_id) = self.session_accounts.get(sid).map(|v| v.clone()) {
-                    let reset_sec = self.rate_limit_tracker.get_remaining_wait(&bound_id);
+                    let reset_sec = self.rate_limit_tracker.get_remaining_wait(&bound_id, None);
                     if reset_sec > 0 {
                         if scheduling.mode == SchedulingMode::CacheFirst
                             && reset_sec <= scheduling.max_wait_seconds
@@ -289,7 +289,7 @@ impl TokenManager {
                         let idx = (start_idx + offset) % total;
                         let candidate = &tokens_snapshot[idx];
                         if attempted.contains(&candidate.account_id)
-                            || self.is_rate_limited(&candidate.account_id)
+                            || self.is_rate_limited(&candidate.account_id, None)
                         {
                             continue;
                         }
@@ -312,7 +312,7 @@ impl TokenManager {
                     let idx = (start_idx + offset) % total;
                     let candidate = &tokens_snapshot[idx];
                     if attempted.contains(&candidate.account_id)
-                        || self.is_rate_limited(&candidate.account_id)
+                        || self.is_rate_limited(&candidate.account_id, None)
                     {
                         continue;
                     }
@@ -390,6 +390,18 @@ impl TokenManager {
                     }
                 }
             };
+
+            // 更新账号的最后使用时间
+            let pool = self.pool.clone();
+            let account_id_for_update = token.account_id.clone();
+            tokio::spawn(async move {
+                let now = chrono::Utc::now().timestamp();
+                let _ = sqlx::query("UPDATE accounts SET last_used = ? WHERE id = ?")
+                    .bind(now)
+                    .bind(&account_id_for_update)
+                    .execute(&pool)
+                    .await;
+            });
 
             return Ok((
                 token.access_token,
@@ -482,11 +494,156 @@ impl TokenManager {
         error: &str,
     ) {
         self.rate_limit_tracker
-            .parse_from_error(account_id, status, retry_after, error);
+            .parse_from_error(account_id, status, retry_after, error, None);
     }
 
-    pub fn is_rate_limited(&self, account_id: &str) -> bool {
-        self.rate_limit_tracker.is_rate_limited(account_id)
+    /// 从账号的实时配额或缓存中获取重试时间
+    pub fn get_quota_reset_time(&self, id: &str) -> Option<String> {
+        // [IMPROVED] Search in current session or global tokens
+        let token = self.tokens.get(id)?;
+
+        let data_dir = self.data_dir.clone();
+        let email = &token.email;
+        let quota_path = data_dir
+            .join("accounts")
+            .join(format!("{}.quota.json", email));
+
+        if quota_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(quota_path) {
+                if let Ok(quota) = serde_json::from_str::<crate::core::models::QuotaData>(&content)
+                {
+                    // Extract earliest reset time from all models
+                    return quota
+                        .models
+                        .iter()
+                        .filter(|m| !m.reset_time.is_empty())
+                        .map(|m| m.reset_time.as_str())
+                        .min()
+                        .map(|s| s.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// 使用配额刷新时间精确锁定账号
+    pub fn set_precise_lockout(
+        &self,
+        id: &str,
+        reason: crate::proxy::rate_limit::RateLimitReason,
+        model: Option<String>,
+    ) -> bool {
+        if let Some(reset_time_str) = self.get_quota_reset_time(id) {
+            tracing::info!("找到账号 {} 的配额刷新时间: {}", id, reset_time_str);
+            self.rate_limit_tracker
+                .set_lockout_until_iso(id, &reset_time_str, reason, model)
+        } else {
+            tracing::debug!("未找到账号 {} 的配额刷新时间,将使用默认退避策略", id);
+            false
+        }
+    }
+
+    /// 实时刷新配额并精确锁定账号
+    pub async fn fetch_and_lock_with_realtime_quota(
+        &self,
+        id: &str,
+        reason: crate::proxy::rate_limit::RateLimitReason,
+        model: Option<String>,
+    ) -> bool {
+        let (access_token, email) = match self.tokens.get(id) {
+            Some(t) => (t.access_token.clone(), t.email.clone()),
+            None => return false,
+        };
+
+        tracing::info!("账号 {} 正在实时刷新配额...", email);
+        match crate::core::quota::fetch_quota(&access_token, &email).await {
+            Ok((quota_data, _project_id)) => {
+                let earliest_reset = quota_data
+                    .models
+                    .iter()
+                    .filter_map(|m| {
+                        if !m.reset_time.is_empty() {
+                            Some(m.reset_time.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .min();
+
+                if let Some(reset_time_str) = earliest_reset {
+                    tracing::info!(
+                        "账号 {} 实时配额刷新成功,reset_time: {}",
+                        email,
+                        reset_time_str
+                    );
+                    self.rate_limit_tracker
+                        .set_lockout_until_iso(id, reset_time_str, reason, model)
+                } else {
+                    false
+                }
+            }
+            Err(e) => {
+                tracing::warn!("账号 {} 实时配额刷新失败: {:?}", email, e);
+                false
+            }
+        }
+    }
+
+    /// 标记账号限流(异步版本,支持实时配额刷新)
+    pub async fn mark_rate_limited_async(
+        &self,
+        id: &str,
+        status: u16,
+        retry_after_header: Option<&str>,
+        error_body: &str,
+        model: Option<&str>,
+    ) {
+        let has_explicit_retry_time =
+            retry_after_header.is_some() || error_body.contains("quotaResetDelay");
+
+        if has_explicit_retry_time {
+            self.rate_limit_tracker.parse_from_error(
+                id,
+                status,
+                retry_after_header,
+                error_body,
+                model.map(|s| s.to_string()),
+            );
+            return;
+        }
+
+        let reason = if error_body.to_lowercase().contains("model_capacity") {
+            crate::proxy::rate_limit::RateLimitReason::ModelCapacityExhausted
+        } else if error_body.to_lowercase().contains("exhausted")
+            || error_body.to_lowercase().contains("quota")
+        {
+            crate::proxy::rate_limit::RateLimitReason::QuotaExhausted
+        } else {
+            crate::proxy::rate_limit::RateLimitReason::Unknown
+        };
+
+        if self
+            .fetch_and_lock_with_realtime_quota(id, reason, model.map(|s| s.to_string()))
+            .await
+        {
+            return;
+        }
+
+        if self.set_precise_lockout(id, reason, model.map(|s| s.to_string())) {
+            return;
+        }
+
+        self.rate_limit_tracker.parse_from_error(
+            id,
+            status,
+            retry_after_header,
+            error_body,
+            model.map(|s| s.to_string()),
+        );
+    }
+
+    pub fn is_rate_limited(&self, account_id: &str, model: Option<&str>) -> bool {
+        self.rate_limit_tracker.is_rate_limited(account_id, model)
     }
 
     pub async fn get_sticky_config(&self) -> StickySessionConfig {

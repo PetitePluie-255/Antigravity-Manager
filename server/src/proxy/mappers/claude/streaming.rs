@@ -3,7 +3,7 @@
 
 use super::models::*;
 use super::utils::to_claude_usage;
-use crate::proxy::mappers::signature_store::store_thought_signature;
+use crate::proxy::SignatureCache;
 use bytes::Bytes;
 use serde_json::json;
 
@@ -271,7 +271,7 @@ impl StreamingState {
         // 处理 grounding(web search) -> 转换为 Markdown 文本块
         if self.web_search_query.is_some() || self.grounding_chunks.is_some() {
             let mut grounding_text = String::new();
-            
+
             // 1. 处理搜索词
             if let Some(query) = &self.web_search_query {
                 if !query.is_empty() {
@@ -285,12 +285,15 @@ impl StreamingState {
                 let mut links = Vec::new();
                 for (i, chunk) in chunks.iter().enumerate() {
                     if let Some(web) = chunk.get("web") {
-                        let title = web.get("title").and_then(|v| v.as_str()).unwrap_or("网页来源");
+                        let title = web
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("网页来源");
                         let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
                         links.push(format!("[{}] [{}]({})", i + 1, title, uri));
                     }
                 }
-                
+
                 if !links.is_empty() {
                     grounding_text.push_str("\n\n**🌐 来源引文：**\n");
                     grounding_text.push_str(&links.join("\n"));
@@ -299,13 +302,19 @@ impl StreamingState {
 
             if !grounding_text.is_empty() {
                 // 发送一个新的 text 块
-                chunks.push(self.emit("content_block_start", json!({
-                    "type": "content_block_start",
-                    "index": self.block_index,
-                    "content_block": { "type": "text", "text": "" }
-                })));
+                chunks.push(self.emit(
+                    "content_block_start",
+                    json!({
+                        "type": "content_block_start",
+                        "index": self.block_index,
+                        "content_block": { "type": "text", "text": "" }
+                    }),
+                ));
                 chunks.push(self.emit_delta("text_delta", json!({ "text": grounding_text })));
-                chunks.push(self.emit("content_block_stop", json!({ "type": "content_block_stop", "index": self.block_index })));
+                chunks.push(self.emit(
+                    "content_block_stop",
+                    json!({ "type": "content_block_stop", "index": self.block_index }),
+                ));
                 self.block_index += 1;
             }
         }
@@ -319,15 +328,13 @@ impl StreamingState {
             "end_turn"
         };
 
-        let usage = usage_metadata
-            .map(|u| to_claude_usage(u))
-            .unwrap_or(Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_input_tokens: None,
-                cache_creation_input_tokens: None,
-                server_tool_use: None,
-            });
+        let usage = usage_metadata.map(|u| to_claude_usage(u)).unwrap_or(Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            server_tool_use: None,
+        });
 
         chunks.push(self.emit(
             "message_delta",
@@ -438,11 +445,12 @@ impl StreamingState {
 /// Part 处理器
 pub struct PartProcessor<'a> {
     state: &'a mut StreamingState,
+    session_id: &'a str,
 }
 
 impl<'a> PartProcessor<'a> {
-    pub fn new(state: &'a mut StreamingState) -> Self {
-        Self { state }
+    pub fn new(state: &'a mut StreamingState, session_id: &'a str) -> Self {
+        Self { state, session_id }
     }
 
     /// 处理单个 part
@@ -550,7 +558,7 @@ impl<'a> PartProcessor<'a> {
         // [IMPROVED] Store signature to global storage immediately, not just on function calls
         // This improves signature availability for subsequent requests
         if let Some(ref sig) = signature {
-            store_thought_signature(sig);
+            SignatureCache::global().cache_session_signature(self.session_id, sig.clone());
             tracing::debug!(
                 "[Claude-SSE] Captured thought_signature from thinking block (length: {})",
                 sig.len()
@@ -673,7 +681,7 @@ impl<'a> PartProcessor<'a> {
         if let Some(ref sig) = signature {
             tool_use["signature"] = json!(sig);
             // Store signature to global storage for replay in subsequent requests
-            store_thought_signature(sig);
+            SignatureCache::global().cache_session_signature(self.session_id, sig.clone());
             tracing::info!(
                 "[Claude-SSE] Captured thought_signature for function call (length: {})",
                 sig.len()
@@ -732,7 +740,7 @@ mod tests {
     #[test]
     fn test_process_function_call_deltas() {
         let mut state = StreamingState::new();
-        let mut processor = PartProcessor::new(&mut state);
+        let mut processor = PartProcessor::new(&mut state, "test_session");
 
         let fc = FunctionCall {
             name: "test_tool".to_string(),

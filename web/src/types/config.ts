@@ -38,6 +38,17 @@ export interface ProxyConfig {
   auth_mode?: string; // 'off' | 'strict' | 'all_except_health' | 'auto'
 }
 
+export interface ScheduledWarmupConfig {
+  enabled: boolean;
+  monitored_models: string[];
+}
+
+export interface QuotaProtectionConfig {
+  enabled: boolean;
+  threshold_percentage: number; // 1-99
+  monitored_models: string[];
+}
+
 export interface AppConfig {
   language: string;
   theme: string;
@@ -46,8 +57,10 @@ export interface AppConfig {
   auto_sync: boolean;
   sync_interval: number;
   default_export_path?: string;
-  antigravity_executable?: string; // [NEW] 手动指定的反重力程序路径
-  auto_launch?: boolean; // 开机自动启动
-  accounts_page_size?: number; // 账号列表每页显示数量,默认 0 表示自动计算
+  antigravity_executable?: string;
+  auto_launch?: boolean;
+  accounts_page_size?: number;
+  scheduled_warmup?: ScheduledWarmupConfig;
+  quota_protection?: QuotaProtectionConfig;
   proxy: ProxyConfig;
 }
