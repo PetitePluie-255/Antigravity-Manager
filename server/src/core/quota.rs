@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
-const USER_AGENT: &str = "antigravity/windows/amd64";
-const QUOTA_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadModelQuotas";
+const USER_AGENT: &str = "antigravity/1.11.3 Darwin/arm64";
+const QUOTA_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 const CLOUD_CODE_BASE_URL: &str = "https://cloudcode-pa.googleapis.com";
 
 const NEAR_READY_THRESHOLD: i32 = 80;

@@ -13,6 +13,7 @@ dist
 dist-ssr
 *.local
 /src-tauri
+/server_python
 
 # Editor directories and files
 .vscode/*
