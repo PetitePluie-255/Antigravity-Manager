@@ -170,7 +170,7 @@ pub async fn bind_device_profile(
     Json(req): Json<BindDeviceProfileRequest>,
 ) -> Response {
     match AccountService::load_account(&state.db_pool, &id).await {
-        Ok(mut account) => {
+        Ok(account) => {
             use crate::core::models::DeviceProfileVersion;
             use chrono::Utc;
             use uuid::Uuid;
