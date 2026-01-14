@@ -108,10 +108,6 @@ function Logs() {
     return new Date(timestamp * 1000).toLocaleString();
   };
 
-  const formatTimeShort = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleTimeString();
-  };
-
   const getStatusColor = (status: number) => {
     if (status >= 200 && status < 300) return "text-white bg-green-500";
     if (status >= 400 && status < 500) return "text-white bg-orange-500";
