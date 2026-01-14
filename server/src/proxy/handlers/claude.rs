@@ -15,6 +15,7 @@ use tracing::{debug, error, info};
 
 use crate::proxy::mappers::claude::{
     transform_claude_request_in, transform_response, create_claude_sse_stream, ClaudeRequest,
+    collector::collect_stream_to_json,
 };
 use crate::state::AppState;
 use axum::http::HeaderMap;
@@ -323,7 +324,7 @@ pub async fn handle_messages(
     Json(body): Json<Value>,
 ) -> Response {
     let start = std::time::Instant::now();
-    tracing::error!(">>> [RED ALERT] handle_messages called! Body JSON len: {}", body.to_string().len());
+
     
     // 生成随机 Trace ID 用户追踪
     let trace_id: String = rand::Rng::sample_iter(rand::thread_rng(), &rand::distributions::Alphanumeric)
@@ -555,7 +556,7 @@ pub async fn handle_messages(
         let session_id = Some(session_id_str.as_str());
 
         let force_rotate_token = attempt > 0;
-        let (access_token, project_id, email, account_id) = match token_manager.get_token(&config.request_type, force_rotate_token, session_id).await {
+        let (access_token, project_id, email, account_id) = match token_manager.get_token(&config.request_type, force_rotate_token, session_id, Some(&mapped_model)).await {
             Ok(t) => t,
             Err(e) => {
                 let safe_message = if e.contains("invalid_grant") {
@@ -637,7 +638,7 @@ pub async fn handle_messages(
         }
 
         
-        request_with_mapped.model = mapped_model;
+        request_with_mapped.model = mapped_model.clone();
 
         // 生成 Trace ID (简单用时间戳后缀)
         // let _trace_id = format!("req_{}", chrono::Utc::now().timestamp_subsec_millis());
@@ -662,9 +663,17 @@ pub async fn handle_messages(
         };
         
     // 4. 上游调用
-    let is_stream = request.stream;
-    let method = if is_stream { "streamGenerateContent" } else { "generateContent" };
-    let query = if is_stream { Some("alt=sse") } else { None };
+    let client_wants_stream = request.stream;
+    // [AUTO-CONVERSION] 非 Stream 请求自动转换为 Stream 以享受更宽松的配额
+    let force_stream_internally = !client_wants_stream;
+    let actual_stream = client_wants_stream || force_stream_internally;
+
+    if force_stream_internally {
+        info!("[{}] 🔄 Auto-converting non-stream request to stream for better quota", trace_id);
+    }
+
+    let method = if actual_stream { "streamGenerateContent" } else { "generateContent" };
+    let query = if actual_stream { Some("alt=sse") } else { None };
 
     let response = match upstream.call_v1_internal(
         method,
@@ -685,111 +694,132 @@ pub async fn handle_messages(
         // 成功
         if status.is_success() {
             // 处理流式响应
-            if request.stream {
+            if actual_stream {
                 let stream = response.bytes_stream();
                 let gemini_stream = Box::pin(stream);
                 let claude_stream = create_claude_sse_stream(
                     gemini_stream,
-                    trace_id,
+                    trace_id.clone(),
                     email.clone(),
                     session_id.unwrap_or_default().to_string(),
                 );
 
-                // Record streaming request to log store
-                let request_json = serde_json::to_string(&request_with_mapped).ok();
-                state.log_store.record(
-                    "POST".to_string(),
-                    "/v1/messages".to_string(),
-                    email.clone(),
-                    request_with_mapped.model.clone(),
-                    0, // tokens_in not available for stream
-                    0, // tokens_out not available for stream
-                    start.elapsed().as_millis() as u32,
-                    200,
-                    None,
-                    request_json,
-                    Some("[Stream Data]".to_string()),
-                );
+                // 判断客户端期望的格式
+                if client_wants_stream {
+                    // 客户端本就要 Stream，直接返回 SSE
+                    // Record streaming request to log store
+                    let request_json = serde_json::to_string(&request_with_mapped).ok();
+                    state.log_store.record(
+                        "POST".to_string(),
+                        "/v1/messages".to_string(),
+                        email.clone(),
+                        request_with_mapped.model.clone(),
+                        0, // tokens_in not available for stream
+                        0, // tokens_out not available for stream
+                        start.elapsed().as_millis() as u32,
+                        200,
+                        None,
+                        request_json,
+                        Some("[Stream Data]".to_string()),
+                    );
 
-                // 转换为 Bytes stream
-                let sse_stream = claude_stream.map(|result| -> Result<Bytes, std::io::Error> {
-                    match result {
-                        Ok(bytes) => Ok(bytes),
-                        Err(e) => Ok(Bytes::from(format!("data: {{\"error\":\"{}\"}}\n\n", e))),
+                    // 转换为 Bytes stream
+                    let sse_stream = claude_stream.map(|result| -> Result<Bytes, std::io::Error> {
+                        match result {
+                            Ok(bytes) => Ok(bytes),
+                            Err(e) => Ok(Bytes::from(format!("data: {{\"error\":\"{}\"}}\n\n", e))),
+                        }
+                    });
+
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "text/event-stream")
+                        .header(header::CACHE_CONTROL, "no-cache")
+                        .header(header::CONNECTION, "keep-alive")
+                        .body(Body::from_stream(sse_stream))
+                        .unwrap();
+                } else {
+                    // 客户端要非 Stream，需要收集完整响应并转换为 JSON
+                    use bytes::Bytes;
+                    use futures::StreamExt;
+
+                    // 转换为 io::Error stream
+                    let sse_stream = claude_stream.map(|result| -> Result<Bytes, std::io::Error> {
+                        match result {
+                            Ok(bytes) => Ok(bytes),
+                            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+                        }
+                    });
+
+                    match collect_stream_to_json(sse_stream).await {
+                        Ok(claude_response) => {
+                            info!("[{}] ✓ Stream collected and converted to JSON", trace_id);
+                            
+                            // [Optimization] 记录闭环日志：消耗情况
+                            let cache_info = if let Some(cached) = claude_response.usage.cache_read_input_tokens {
+                                format!(", Cached: {}", cached)
+                            } else {
+                                String::new()
+                            };
+                            
+                            tracing::info!(
+                                "[{}] Request finished. Model: {}, Tokens: In {}, Out {}{}", 
+                                trace_id, 
+                                request_with_mapped.model, 
+                                claude_response.usage.input_tokens, 
+                                claude_response.usage.output_tokens,
+                                cache_info
+                            );
+
+                            // Record to log store
+                            let request_json = serde_json::to_string(&request_with_mapped).ok();
+                            let response_json = serde_json::to_string(&claude_response).ok();
+                            state.log_store.record(
+                                "POST".to_string(),
+                                "/v1/messages".to_string(),
+                                email.clone(),
+                                request_with_mapped.model.clone(),
+                                claude_response.usage.input_tokens,
+                                claude_response.usage.output_tokens,
+                                start.elapsed().as_millis() as u32,
+                                200,
+                                None,
+                                request_json,
+                                response_json,
+                            );
+
+                            return Json(claude_response).into_response();
+                        }
+                        Err(e) => {
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Stream collection error: {}", e),
+                            ).into_response();
+                        }
                     }
-                });
-
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "text/event-stream")
-                    .header(header::CACHE_CONTROL, "no-cache")
-                    .header(header::CONNECTION, "keep-alive")
-                    .body(Body::from_stream(sse_stream))
-                    .unwrap();
+                }
             } else {
-                // 处理非流式响应
+                // 处理非流式响应 (本应被 Auto-conversion 覆盖，保留作为回退)
                 let bytes = match response.bytes().await {
                     Ok(b) => b,
                     Err(e) => return (StatusCode::BAD_GATEWAY, format!("Failed to read body: {}", e)).into_response(),
                 };
                 
-                // Debug print
-                if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                    debug!("Upstream Response for Claude request: {}", text);
-                }
-
                 let gemini_resp: Value = match serde_json::from_slice(&bytes) {
                     Ok(v) => v,
                     Err(e) => return (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)).into_response(),
                 };
 
-                // 解包 response 字段（v1internal 格式）
                 let raw = gemini_resp.get("response").unwrap_or(&gemini_resp);
-
-                // 转换为 Gemini Response 结构
                 let gemini_response: crate::proxy::mappers::claude::models::GeminiResponse = match serde_json::from_value(raw.clone()) {
                     Ok(r) => r,
                     Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Convert error: {}", e)).into_response(),
                 };
                 
-                // 转换
                 let claude_response = match transform_response(&gemini_response) {
                     Ok(r) => r,
                     Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Transform error: {}", e)).into_response(),
                 };
-
-                // [Optimization] 记录闭环日志：消耗情况
-                let cache_info = if let Some(cached) = claude_response.usage.cache_read_input_tokens {
-                    format!(", Cached: {}", cached)
-                } else {
-                    String::new()
-                };
-                
-                tracing::info!(
-                    "[{}] Request finished. Model: {}, Tokens: In {}, Out {}{}", 
-                    trace_id, 
-                    request_with_mapped.model, 
-                    claude_response.usage.input_tokens, 
-                    claude_response.usage.output_tokens,
-                    cache_info
-                );
-
-                // Record to log store
-                let request_json = serde_json::to_string(&request_with_mapped).ok();
-                let response_json = serde_json::to_string(&claude_response).ok();
-                state.log_store.record(
-                    "POST".to_string(),
-                    "/v1/messages".to_string(),
-                    email.clone(),
-                    request_with_mapped.model.clone(),
-                    claude_response.usage.input_tokens,
-                    claude_response.usage.output_tokens,
-                    start.elapsed().as_millis() as u32,
-                    200,
-                    None,
-                    request_json,
-                    response_json,
-                );
 
                 return Json(claude_response).into_response();
             }
@@ -806,7 +836,7 @@ pub async fn handle_messages(
         
         // 3. 标记限流状态（用于 UI 显示）
         if status_code == 429 || status_code == 529 || status_code == 503 || status_code == 500 {
-            token_manager.mark_rate_limited(&account_id, status_code, retry_after.as_deref(), &error_text);
+            token_manager.mark_rate_limited(&account_id, status_code, retry_after.as_deref(), &error_text, Some(&mapped_model));
         }
 
         // 4. 处理 400 错误 (Thinking 签名失效)

@@ -75,7 +75,12 @@ pub async fn handle_chat_completions(
         // 4. 获取 Token (使用准确的 request_type)
         // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
         let (access_token, project_id, email, account_id) = match token_manager
-            .get_token(&config.request_type, attempt > 0, Some(&session_id))
+            .get_token(
+                &config.request_type,
+                attempt > 0,
+                Some(&session_id),
+                Some(&mapped_model),
+            )
             .await
         {
             Ok(t) => t,
@@ -268,6 +273,7 @@ pub async fn handle_chat_completions(
                 status_code,
                 retry_after.as_deref(),
                 &error_text,
+                Some(&mapped_model),
             );
 
             // 1. 优先尝试解析 RetryInfo (由 Google Cloud 直接下发)
@@ -640,18 +646,15 @@ pub async fn handle_completions(
             &tools_val,
         );
 
-        let (access_token, project_id, email, _account_id) = match token_manager
-            .get_token(&config.request_type, false, None)
+        let (access_token, project_id, email, _account_id) = token_manager
+            .get_token(&config.request_type, false, None, Some(&mapped_model))
             .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                return Err((
+            .map_err(|e| {
+                (
                     StatusCode::SERVICE_UNAVAILABLE,
                     format!("Token error: {}", e),
-                ))
-            }
-        };
+                )
+            })?;
 
         info!("✓ Using account: {} (type: {})", email, config.request_type);
 
@@ -893,16 +896,18 @@ pub async fn handle_images_generations(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager.clone();
 
-    let (access_token, project_id, email, _account_id) =
-        match token_manager.get_token("image_gen", false, None).await {
-            Ok(t) => t,
-            Err(e) => {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("Token error: {}", e),
-                ))
-            }
-        };
+    let (access_token, project_id, email, _account_id) = match token_manager
+        .get_token("image_gen", false, None, Some(model))
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Token error: {}", e),
+            ))
+        }
+    };
 
     info!("✓ Using account: {} for image generation", email);
 
@@ -1143,16 +1148,18 @@ pub async fn handle_images_edits(
     let upstream = state.upstream.clone();
     let token_manager = state.token_manager.clone();
     // Fix: Proper get_token call with correct signature and unwrap (using image_gen quota)
-    let (access_token, project_id, _email, _account_id) =
-        match token_manager.get_token("image_gen", false, None).await {
-            Ok(t) => t,
-            Err(e) => {
-                return Err((
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    format!("Token error: {}", e),
-                ))
-            }
-        };
+    let (access_token, project_id, _email, _account_id) = match token_manager
+        .get_token("image_gen", false, None, Some(&model))
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Token error: {}", e),
+            ))
+        }
+    };
 
     // 2. 映射配置
     let mut contents_parts = Vec::new();

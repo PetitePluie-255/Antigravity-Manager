@@ -204,6 +204,7 @@ impl TokenManager {
         quota_group: &str,
         force_rotate: bool,
         session_id: Option<&str>,
+        model: Option<&str>,
     ) -> Result<(String, String, String, String), String> {
         let mut tokens_snapshot: Vec<ProxyToken> =
             self.tokens.iter().map(|e| e.value().clone()).collect();
@@ -240,7 +241,7 @@ impl TokenManager {
             {
                 let sid = session_id.unwrap();
                 if let Some(bound_id) = self.session_accounts.get(sid).map(|v| v.clone()) {
-                    let reset_sec = self.rate_limit_tracker.get_remaining_wait(&bound_id, None);
+                    let reset_sec = self.rate_limit_tracker.get_remaining_wait(&bound_id, model);
                     if reset_sec > 0 {
                         if scheduling.mode == SchedulingMode::CacheFirst
                             && reset_sec <= scheduling.max_wait_seconds
@@ -289,7 +290,7 @@ impl TokenManager {
                         let idx = (start_idx + offset) % total;
                         let candidate = &tokens_snapshot[idx];
                         if attempted.contains(&candidate.account_id)
-                            || self.is_rate_limited(&candidate.account_id, None)
+                            || self.is_rate_limited(&candidate.account_id, model)
                         {
                             continue;
                         }
@@ -312,7 +313,7 @@ impl TokenManager {
                     let idx = (start_idx + offset) % total;
                     let candidate = &tokens_snapshot[idx];
                     if attempted.contains(&candidate.account_id)
-                        || self.is_rate_limited(&candidate.account_id, None)
+                        || self.is_rate_limited(&candidate.account_id, model)
                     {
                         continue;
                     }
@@ -326,7 +327,10 @@ impl TokenManager {
                 None => {
                     let min_wait = tokens_snapshot
                         .iter()
-                        .filter_map(|t| self.rate_limit_tracker.get_reset_seconds(&t.account_id))
+                        .filter_map(|t| {
+                            self.rate_limit_tracker
+                                .get_reset_seconds(&t.account_id, model)
+                        })
                         .min()
                         .unwrap_or(60);
                     return Err(format!(
@@ -492,9 +496,15 @@ impl TokenManager {
         status: u16,
         retry_after: Option<&str>,
         error: &str,
+        model: Option<&str>,
     ) {
-        self.rate_limit_tracker
-            .parse_from_error(account_id, status, retry_after, error, None);
+        self.rate_limit_tracker.parse_from_error(
+            account_id,
+            status,
+            retry_after,
+            error,
+            model.map(|s| s.to_string()),
+        );
     }
 
     /// 从账号的实时配额或缓存中获取重试时间

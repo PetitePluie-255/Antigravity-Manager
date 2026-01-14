@@ -87,7 +87,12 @@ pub async fn handle_generate(
 
         // 关键：在重试尝试 (attempt > 0) 时强制轮换账号
         let (access_token, project_id, email, account_id) = match token_manager
-            .get_token(&config.request_type, attempt > 0, Some(&session_id))
+            .get_token(
+                &config.request_type,
+                attempt > 0,
+                Some(&session_id),
+                Some(&mapped_model),
+            )
             .await
         {
             Ok(t) => t,
@@ -288,6 +293,7 @@ pub async fn handle_generate(
                 status_code,
                 retry_after.as_deref(),
                 &error_text,
+                Some(&mapped_model),
             );
 
             // 只有明确包含 "QUOTA_EXHAUSTED" 才停止，避免误判上游的频率限制提示 (如 "check quota")
@@ -371,7 +377,7 @@ pub async fn handle_count_tokens(
     let model_group = "gemini";
     let (_access_token, _project_id, _, _account_id) = state
         .token_manager
-        .get_token(model_group, false, None)
+        .get_token(model_group, false, None, None)
         .await
         .map_err(|e| {
             (

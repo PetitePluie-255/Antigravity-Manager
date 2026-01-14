@@ -488,12 +488,10 @@ impl RateLimitTracker {
     }
 
     /// 获取距离限流重置还有多少秒
-    pub fn get_reset_seconds(&self, account_id: &str) -> Option<u64> {
-        if let Some(info) = self.get(account_id) {
-            info.reset_time
-                .duration_since(SystemTime::now())
-                .ok()
-                .map(|d| d.as_secs())
+    pub fn get_reset_seconds(&self, account_id: &str, model: Option<&str>) -> Option<u64> {
+        let wait = self.get_remaining_wait(account_id, model);
+        if wait > 0 {
+            Some(wait)
         } else {
             None
         }

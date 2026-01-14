@@ -126,6 +126,7 @@ pub fn wrap_request(body: &Value, project_id: &str, mapped_model: &str) -> Value
         } else {
             // 没有 systemInstruction,创建一个新的
             inner_request["systemInstruction"] = json!({
+                "role": "user",
                 "parts": [{"text": antigravity_identity}]
             });
         }

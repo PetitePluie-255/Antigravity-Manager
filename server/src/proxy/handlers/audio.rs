@@ -100,7 +100,7 @@ pub async fn handle_audio_transcription(
     let token_manager = state.token_manager;
     let (access_token, project_id, email, _account_id): (String, String, String, String) =
         token_manager
-            .get_token("text", false, None)
+            .get_token("text", false, None, Some(&model))
             .await
             .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
 
