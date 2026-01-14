@@ -25,6 +25,7 @@ pub fn create_claude_sse_stream(
     trace_id: String,
     email: String,
     session_id: String,
+    log_ctx: Option<crate::proxy::mappers::openai::streaming::StreamLogContext>,
 ) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> {
     use async_stream::stream;
     use bytes::BytesMut;
@@ -84,6 +85,29 @@ pub fn create_claude_sse_stream(
         // Ensure termination events are sent
         for chunk in emit_force_stop(&mut state) {
             yield Ok(chunk);
+        }
+
+        // [NEW] Record to log_store at stream end if context provided
+        if let Some(ctx) = log_ctx {
+            let total_out = state.aggregated_content.len() as u32; // Rough estimate of output tokens if usage not available
+            // Actually, tokens are tracked in trace logs. For log_store, we use the ones from Gemini usage if we have them.
+            // But log_store.record takes u32 for tokens.
+
+            // NOTE: tokens_in and tokens_out are not easily accessible here without more plumbing.
+            // For now, prioritize recording the full response body.
+            ctx.log_store.record(
+                "POST".to_string(),
+                ctx.endpoint,
+                ctx.email,
+                ctx.model,
+                0, // Simplified
+                total_out,
+                ctx.start_time.elapsed().as_millis() as u32,
+                200,
+                None,
+                ctx.request_json,
+                Some(state.aggregated_content),
+            );
         }
     })
 }

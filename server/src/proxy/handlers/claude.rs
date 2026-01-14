@@ -702,26 +702,20 @@ pub async fn handle_messages(
                     trace_id.clone(),
                     email.clone(),
                     session_id.unwrap_or_default().to_string(),
+                    Some(crate::proxy::mappers::openai::streaming::StreamLogContext {
+                        log_store: state.log_store.clone(),
+                        email: email.clone(),
+                        model: request_with_mapped.model.clone(),
+                        endpoint: "/v1/messages".to_string(),
+                        request_json: serde_json::to_string(&request_with_mapped).ok(),
+                        start_time: start,
+                    }),
                 );
 
                 // 判断客户端期望的格式
                 if client_wants_stream {
                     // 客户端本就要 Stream，直接返回 SSE
-                    // Record streaming request to log store
-                    let request_json = serde_json::to_string(&request_with_mapped).ok();
-                    state.log_store.record(
-                        "POST".to_string(),
-                        "/v1/messages".to_string(),
-                        email.clone(),
-                        request_with_mapped.model.clone(),
-                        0, // tokens_in not available for stream
-                        0, // tokens_out not available for stream
-                        start.elapsed().as_millis() as u32,
-                        200,
-                        None,
-                        request_json,
-                        Some("[Stream Data]".to_string()),
-                    );
+                    // [REMOVED] Premature logging moved to stream end in create_claude_sse_stream
 
                     // 转换为 Bytes stream
                     let sse_stream = claude_stream.map(|result| -> Result<Bytes, std::io::Error> {

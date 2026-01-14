@@ -147,6 +147,13 @@ pub async fn handle_generate(
                 let mut response_stream = response.bytes_stream();
                 let mut buffer = BytesMut::new();
 
+                let state_clone = state.clone();
+                let model_name_clone = model_name.clone();
+                let email_clone = email.clone();
+                let start_clone = start;
+                let request_json_cached_clone = request_json_cached.clone();
+
+                let mut aggregated_content = String::new();
                 let stream = async_stream::stream! {
                     while let Some(item) = response_stream.next().await {
                         match item {
@@ -167,13 +174,30 @@ pub async fn handle_generate(
                                             }
 
                                             match serde_json::from_str::<Value>(json_part) {
-                                                Ok(mut json) => {
+                                                Ok(mut parsed_json_chunk) => { // Renamed from 'json' to 'parsed_json_chunk'
+                                                    // [NEW] Aggregate content for logging
+                                                    let actual_data = parsed_json_chunk.get("response").unwrap_or(&parsed_json_chunk);
+                                                    if let Some(candidates) = actual_data.get("candidates").and_then(|c| c.as_array()) {
+                                                        if let Some(parts) = candidates.get(0).and_then(|c| c.get("content")).and_then(|c| c.get("parts")).and_then(|p| p.as_array()) {
+                                                            for part in parts {
+                                                                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                                                    aggregated_content.push_str(text);
+                                                                }
+                                                                if let Some(_thought) = part.get("thought").and_then(|t| t.as_bool()).filter(|&t| t) {
+                                                                     if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                                                         aggregated_content.push_str(&format!("<thought>\n{}\n</thought>\n", text));
+                                                                     }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
                                                     // Unwrap v1internal response wrapper
-                                                    if let Some(inner) = json.get_mut("response").map(|v| v.take()) {
+                                                    if let Some(inner) = parsed_json_chunk.get_mut("response").map(|v: &mut Value| v.take()) {
                                                         let new_line = format!("data: {}\n\n", serde_json::to_string(&inner).unwrap_or_default());
                                                         yield Ok::<Bytes, String>(Bytes::from(new_line));
                                                     } else {
-                                                        yield Ok::<Bytes, String>(Bytes::from(format!("data: {}\n\n", serde_json::to_string(&json).unwrap_or_default())));
+                                                        yield Ok::<Bytes, String>(Bytes::from(format!("data: {}\n\n", serde_json::to_string(&parsed_json_chunk).unwrap_or_default())));
                                                     }
                                                 }
                                                 Err(e) => {
@@ -198,22 +222,25 @@ pub async fn handle_generate(
                             }
                         }
                     }
+
+                    // [NEW] Record to log store at stream end
+                    state_clone.log_store.record(
+                        "POST".to_string(),
+                        format!("/v1beta/models/{}:streamGenerateContent", model_name_clone),
+                        email_clone,
+                        model_name_clone,
+                        0, // tokens_in not available for stream
+                        0, // tokens_out not available for stream
+                        start_clone.elapsed().as_millis() as u32,
+                        200,
+                        None,
+                        request_json_cached_clone,
+                        Some(aggregated_content),
+                    );
                 };
 
                 let response_body = Body::from_stream(stream);
-                state.log_store.record(
-                    "POST".to_string(),
-                    format!("/v1beta/models/{}:streamGenerateContent", model_name),
-                    email.clone(),
-                    model_name.clone(),
-                    0, // tokens_in not available for stream
-                    0, // tokens_out not available for stream
-                    start.elapsed().as_millis() as u32,
-                    200,
-                    None,
-                    request_json_cached.clone(),
-                    Some("[Stream Data]".to_string()),
-                );
+                // [REMOVED] Premature logging moved to stream end
 
                 return Ok(Response::builder()
                     .header("Content-Type", "text/event-stream")

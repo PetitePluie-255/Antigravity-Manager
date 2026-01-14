@@ -79,6 +79,8 @@ pub fn create_openai_sse_stream(
     let stream_id = format!("chatcmpl-{}", Uuid::new_v4());
     let created_ts = Utc::now().timestamp();
 
+    let mut aggregated_content = String::new();
+
     let stream = async_stream::stream! {
         while let Some(item) = gemini_stream.next().await {
             match item {
@@ -148,6 +150,14 @@ pub fn create_openai_sse_stream(
                                         }
                                     }
 
+                                    // [NEW] Aggregate content for logging
+                                    if !thought_out.is_empty() {
+                                        aggregated_content.push_str(&format!("<thought>\n{}\n</thought>\n", thought_out));
+                                    }
+                                    if !content_out.is_empty() {
+                                        aggregated_content.push_str(&content_out);
+                                    }
+
                                     // 处理联网搜索引文 (Grounding Metadata) - 流式
                                     if let Some(grounding) = candidate.and_then(|c| c.get("groundingMetadata")) {
                                         let mut grounding_text = String::new();
@@ -175,6 +185,7 @@ pub fn create_openai_sse_stream(
                                         }
                                         if !grounding_text.is_empty() {
                                             content_out.push_str(&grounding_text);
+                                            aggregated_content.push_str(&grounding_text);
                                         }
                                     }
 
@@ -302,7 +313,7 @@ pub fn create_openai_sse_stream(
                 200,
                 None,
                 ctx.request_json,
-                Some("[Stream Data]".to_string()),
+                Some(aggregated_content),
             );
         }
         // End of stream signal for OpenAI

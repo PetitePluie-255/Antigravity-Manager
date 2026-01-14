@@ -89,6 +89,8 @@ pub struct StreamingState {
     trailing_signature: Option<String>,
     pub web_search_query: Option<String>,
     pub grounding_chunks: Option<Vec<serde_json::Value>>,
+    // [NEW] 聚合后的完整内容（用于日志记录）
+    pub aggregated_content: String,
     // [IMPROVED] Error recovery 状态追踪
     parse_error_count: usize,
     last_valid_state: Option<BlockType>,
@@ -106,6 +108,7 @@ impl StreamingState {
             trailing_signature: None,
             web_search_query: None,
             grounding_chunks: None,
+            aggregated_content: String::new(),
             // [IMPROVED] 初始化 error recovery 字段
             parse_error_count: 0,
             last_valid_state: None,
@@ -235,6 +238,21 @@ impl StreamingState {
         )
     }
 
+    /// [NEW] 记录 delta 内容到聚合缓冲区
+    pub fn aggregate_delta(&mut self, block_type: BlockType, content: &str) {
+        match block_type {
+            BlockType::Text => {
+                self.aggregated_content.push_str(content);
+            }
+            BlockType::Thinking => {
+                // 如果是 Thinking 块，使用特定格式包裹（模拟 OpenAI 风格）
+                self.aggregated_content
+                    .push_str(&format!("<thought>\n{}\n</thought>\n", content));
+            }
+            _ => {}
+        }
+    }
+
     /// 发送结束事件
     pub fn emit_finish(
         &mut self,
@@ -311,6 +329,7 @@ impl StreamingState {
                     }),
                 ));
                 chunks.push(self.emit_delta("text_delta", json!({ "text": grounding_text })));
+                self.aggregated_content.push_str(&grounding_text);
                 chunks.push(self.emit(
                     "content_block_stop",
                     json!({ "type": "content_block_stop", "index": self.block_index }),
@@ -553,6 +572,7 @@ impl<'a> PartProcessor<'a> {
                 self.state
                     .emit_delta("thinking_delta", json!({ "thinking": text })),
             );
+            self.state.aggregate_delta(BlockType::Thinking, text);
         }
 
         // [IMPROVED] Store signature to global storage immediately, not just on function calls
@@ -648,6 +668,7 @@ impl<'a> PartProcessor<'a> {
         }
 
         chunks.push(self.state.emit_delta("text_delta", json!({ "text": text })));
+        self.state.aggregate_delta(BlockType::Text, text);
 
         chunks
     }
