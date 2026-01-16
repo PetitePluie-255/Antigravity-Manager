@@ -153,6 +153,16 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                     }
                     */
 
+                    // [FIX] Gemini 3 要求所有 functionCall 必须包含有效的 thoughtSignature
+                    // 如果全局存储中没有有效的 thoughtSignature，跳过这个 tool_call 以避免 INVALID_ARGUMENT 错误
+                    if mapped_model.contains("gemini-3") && global_thought_sig.is_none() {
+                        tracing::warn!(
+                            "[OpenAI-Request] 跳过历史消息中的 tool_call ({}): 缺少有效的 thoughtSignature",
+                            tc.function.name
+                        );
+                        continue;
+                    }
+
                     let args = serde_json::from_str::<Value>(&tc.function.arguments).unwrap_or(json!({}));
                     let mut func_call_part = json!({
                         "functionCall": {
@@ -192,6 +202,18 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
             }
 
             json!({ "role": role, "parts": parts })
+        })
+        .filter(|msg| {
+            // [FIX] 过滤掉 parts 为空的消息，避免 Gemini 返回 INVALID_ARGUMENT 错误
+            if let Some(parts_val) = msg.get("parts") {
+                if let Some(parts_arr) = parts_val.as_array() {
+                    !parts_arr.is_empty()
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
         })
         .collect();
 

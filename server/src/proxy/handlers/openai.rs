@@ -102,6 +102,9 @@ pub async fn handle_chat_completions(
             debug!("[OpenAI-Request] Transformed Gemini Body:\n{}", body_json);
         }
 
+        // [DEBUG] 克隆 gemini_body 用于错误调试
+        let gemini_body_for_debug = gemini_body.clone();
+
         // 5. 发送请求 - 自动转换逻辑
         let client_wants_stream = openai_req.stream;
         // [AUTO-CONVERSION] 非 Stream 请求自动转换为 Stream 以享受更宽松的配额
@@ -256,6 +259,15 @@ pub async fn handle_chat_completions(
             .text()
             .await
             .unwrap_or_else(|_| format!("HTTP {}", status_code));
+        
+        // [DEBUG] 对于 400 错误，打印详细的错误信息和转换后的请求
+        if status_code == 400 {
+            error!("[OpenAI-Request] 400 Bad Request - Gemini API Error:\n{}", error_text);
+            if let Ok(body_json) = serde_json::to_string_pretty(&gemini_body_for_debug) {
+                error!("[OpenAI-Request] Transformed Gemini Body (for debugging):\n{}", body_json);
+            }
+        }
+        
         last_error = format!("HTTP {}: {}", status_code, error_text);
 
         // [New] 打印错误报文日志

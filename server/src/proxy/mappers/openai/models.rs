@@ -25,6 +25,13 @@ pub struct OpenAIRequest {
     pub tool_choice: Option<Value>,
     #[serde(rename = "parallel_tool_calls")]
     pub parallel_tool_calls: Option<bool>,
+    // OpenAI additional parameters
+    #[serde(rename = "frequency_penalty")]
+    pub frequency_penalty: Option<f32>,
+    #[serde(rename = "presence_penalty")]
+    pub presence_penalty: Option<f32>,
+    #[serde(rename = "stream_options")]
+    pub stream_options: Option<Value>,
     // Codex proprietary fields
     pub instructions: Option<String>,
     pub input: Option<Value>,
