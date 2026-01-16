@@ -82,6 +82,10 @@ pub fn create_openai_sse_stream(
     let mut aggregated_content = String::new();
 
     let stream = async_stream::stream! {
+        // [FIX] Track emitted tool_calls to avoid duplicates and for correct finish_reason
+        let mut emitted_tool_call_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut has_tool_calls = false;
+
         while let Some(item) = gemini_stream.next().await {
             match item {
                 Ok(bytes) => {
@@ -120,6 +124,7 @@ pub fn create_openai_sse_stream(
 
                                     let mut content_out = String::new();
                                     let mut thought_out = String::new();
+                                    let mut tool_calls_out: Vec<Value> = Vec::new();
 
                                     if let Some(parts_list) = parts {
                                         for part in parts_list {
@@ -145,6 +150,35 @@ pub fn create_openai_sse_stream(
                                                 let data = img.get("data").and_then(|v| v.as_str()).unwrap_or("");
                                                 if !data.is_empty() {
                                                     content_out.push_str(&format!("![image](data:{};base64,{})", mime_type, data));
+                                                }
+                                            }
+
+                                            // [FIX] Handle functionCall and convert to OpenAI tool_calls format
+                                            if let Some(fc) = part.get("functionCall") {
+                                                let call_key = serde_json::to_string(fc).unwrap_or_default();
+                                                if !emitted_tool_call_keys.contains(&call_key) {
+                                                    emitted_tool_call_keys.insert(call_key);
+                                                    has_tool_calls = true;
+
+                                                    let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                    let args = fc.get("args").map(|v| v.to_string()).unwrap_or_else(|| "{}".to_string());
+                                                    let id = fc.get("id")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(|s| s.to_string())
+                                                        .unwrap_or_else(|| format!("call_{}", Uuid::new_v4().to_string().replace("-", "")[..24].to_string()));
+
+                                                    let tool_call_index = tool_calls_out.len();
+                                                    tool_calls_out.push(json!({
+                                                        "index": tool_call_index,
+                                                        "id": id,
+                                                        "type": "function",
+                                                        "function": {
+                                                            "name": name,
+                                                            "arguments": args
+                                                        }
+                                                    }));
+
+                                                    tracing::debug!("[OpenAI-SSE] Detected functionCall: {} with args length {}", name, args.len());
                                                 }
                                             }
                                         }
@@ -189,9 +223,9 @@ pub fn create_openai_sse_stream(
                                         }
                                     }
 
-                                    // [FIX] Only skip if BOTH content and thought are empty
-                                    if content_out.is_empty() && thought_out.is_empty() {
-                                        // Skip empty chunks if no text/grounding/thought was found
+                                    // [FIX] Only skip if content, thought AND tool_calls are all empty
+                                    if content_out.is_empty() && thought_out.is_empty() && tool_calls_out.is_empty() {
+                                        // Skip empty chunks if no text/grounding/thought/tool_calls was found
                                         if candidate.and_then(|c| c.get("finishReason")).is_none() {
                                             continue;
                                         }
@@ -201,7 +235,10 @@ pub fn create_openai_sse_stream(
                                     let finish_reason = candidate.and_then(|c| c.get("finishReason"))
                                         .and_then(|f| f.as_str())
                                         .map(|f| match f {
-                                            "STOP" => "stop",
+                                            "STOP" => {
+                                                // [FIX] If we have tool_calls, finish_reason should be "tool_calls" not "stop"
+                                                if has_tool_calls { "tool_calls" } else { "stop" }
+                                            },
                                             "MAX_TOKENS" => "length",
                                             "SAFETY" => "content_filter",
                                             _ => f,
@@ -246,10 +283,9 @@ pub fn create_openai_sse_stream(
                                         yield Ok::<Bytes, String>(Bytes::from(sse_out));
                                     }
 
-                                    // Construct OpenAI SSE chunk
-                                    // [FIX] Only yield openai_chunk if content is NOT empty OR finish_reason is present
-                                    if !content_out.is_empty() || finish_reason.is_some() {
-                                        let openai_chunk = json!({
+                                    // [FIX] Yield tool_calls chunk if present (OpenAI format)
+                                    if !tool_calls_out.is_empty() {
+                                        let tool_calls_chunk = json!({
                                             "id": &stream_id,
                                             "object": "chat.completion.chunk",
                                             "created": created_ts,
@@ -258,8 +294,37 @@ pub fn create_openai_sse_stream(
                                                 {
                                                     "index": 0,
                                                     "delta": {
-                                                        "content": content_out
+                                                        "role": "assistant",
+                                                        "content": null,
+                                                        "tool_calls": tool_calls_out
                                                     },
+                                                    "finish_reason": null
+                                                }
+                                            ]
+                                        });
+                                        let sse_out = format!("data: {}\n\n", serde_json::to_string(&tool_calls_chunk).unwrap_or_default());
+                                        yield Ok::<Bytes, String>(Bytes::from(sse_out));
+                                        tracing::debug!("[OpenAI-SSE] Emitted tool_calls chunk with {} calls", tool_calls_out.len());
+                                    }
+
+                                    // Construct OpenAI SSE chunk
+                                    // [FIX] Only yield openai_chunk if content is NOT empty OR finish_reason is present
+                                    // [FIX] When we have tool_calls, we still need to emit the finish_reason chunk
+                                    if !content_out.is_empty() || finish_reason.is_some() {
+                                        let mut delta = json!({});
+                                        if !content_out.is_empty() {
+                                            delta["content"] = json!(content_out);
+                                        }
+                                        
+                                        let openai_chunk = json!({
+                                            "id": &stream_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [
+                                                {
+                                                    "index": 0,
+                                                    "delta": delta,
                                                     "finish_reason": finish_reason
                                                 }
                                             ]
