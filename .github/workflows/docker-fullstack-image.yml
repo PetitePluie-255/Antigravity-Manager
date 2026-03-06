@@ -13,11 +13,6 @@ on:
         description: "docker build --build-arg USE_MIRROR"
         required: false
         default: "auto"
-        type: choice
-        options:
-          - auto
-          - true
-          - false
 
 jobs:
   docker:
@@ -73,6 +68,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            USE_MIRROR=${{ github.event_name == 'workflow_dispatch' && inputs.use_mirror || 'auto' }}
+            USE_MIRROR=${{ github.event.inputs.use_mirror || 'auto' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
